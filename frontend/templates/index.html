@@ -477,6 +477,54 @@ function paintEnemyDrawer(group, index) {
 
 /* ---------------- 阿兹班石抽屉 ---------------- */
 
+/* ---------------- 阿兹班石：点技能名看效果 ---------------- */
+const skillInfoCache = new Map();
+
+async function skillInfo(name) {
+  if (skillInfoCache.has(name)) return skillInfoCache.get(name);
+  let info = { found: false };
+  try {
+    const r = await fetch('/api/skill?name=' + encodeURIComponent(name));
+    if (r.ok) info = await r.json();
+  } catch (e) {
+    info = { found: false };
+  }
+  skillInfoCache.set(name, info);
+  return info;
+}
+
+function skillBtn(name, cls) {
+  const b = el('button', ('skill-link ' + cls).trim(), name);
+  b.type = 'button';
+  b.title = '点击查看技能效果';
+  return b;
+}
+
+async function toggleSkillEffect(row, name) {
+  const open = row.querySelector('.azskill-desc');
+  if (open) {
+    open.remove();
+    row.classList.remove('az-open');
+    return;
+  }
+  row.classList.add('az-open');
+  const box = el('p', 'azskill-desc', '读取中…');
+  row.appendChild(box);
+  const info = await skillInfo(name);
+  if (!info.found) {
+    box.textContent = info.hint || '（数据里没有收录这个技能的效果说明）';
+    return;
+  }
+  // 描述里若自带「目标：…」行也一并去掉
+  box.textContent = String(info.desc || '').replace(/^\s*目标[:：].*$/gm, '').trim()
+    || '（这个技能没有文字说明）';
+  const bits = [];
+  if (info.ap) bits.push('AP ' + info.ap);
+  if (info.cp) bits.push('CP ' + info.cp);
+  if (info.dmg) bits.push('伤害 ' + info.dmg + '%');
+  if (bits.length) box.appendChild(el('span', 'azskill-meta', bits.join(' · ')));
+}
+
 function paintAzbanDrawer(group, index) {
   const v = group.variants[index];
   const at = group.variants.length - 1;
@@ -511,11 +559,6 @@ function paintAzbanDrawer(group, index) {
     body.appendChild(bar);
   }
 
-  // 适用：通用看兵种+体型，专属看绑定的机体
-  body.appendChild(el('p', 'dhint', group.exclusive
-    ? `专属：${group.char_name || '—'}（${group.arms_id || '—'}），只有这台机体能装。`
-    : `通用：${group.body || '—'}${group.class_name || '—'} 都能装。`));
-
   body.appendChild(el('h4', 'dsub', '属性加成'));
   const statBox = el('div', 'statbox');
   if (!v.stats.length) {
@@ -534,15 +577,25 @@ function paintAzbanDrawer(group, index) {
     body.appendChild(el('h4', 'dsub', `替换技能（${v.repls.length}）`));
     for (const p2 of v.repls) {
       const row = el('div', 'azpair');
-      row.appendChild(el('span', 'az-old', p2.old));
+      const oldB = skillBtn(p2.old, 'az-old');
+      oldB.addEventListener('click', () => toggleSkillEffect(row, p2.old));
+      const newB = skillBtn(p2.new, 'az-new');
+      newB.addEventListener('click', () => toggleSkillEffect(row, p2.new));
+      row.appendChild(oldB);
       row.appendChild(el('span', 'az-arrow', '→'));
-      row.appendChild(el('span', 'az-new', p2.new));
+      row.appendChild(newB);
       body.appendChild(row);
     }
   }
   if (v.adds.length) {
     body.appendChild(el('h4', 'dsub', `新增技能（${v.adds.length}）`));
-    for (const name of v.adds) body.appendChild(el('div', 'azadd', name));
+    for (const name of v.adds) {
+      const row = el('div', 'azadd');
+      const b = skillBtn(name, '');
+      b.addEventListener('click', () => toggleSkillEffect(row, name));
+      row.appendChild(b);
+      body.appendChild(row);
+    }
   }
   if (!v.repls.length && !v.adds.length) {
     body.appendChild(el('p', 'sempty', '这颗石头不改技能，只加属性。'));

@@ -1170,7 +1170,35 @@ def character_page(charid: str):
     return render_template("character.html", charid=charid)
 
 
+@app.get("/stats")
+def stats_page():
+    return render_template("stats.html")
+
+
 ENEMY_ART_DIR = os.environ.get("ARMSBANK_ENEMY_ART_DIR") or os.path.join(BASE_DIR, "data", "enemy_art")
+
+# 页面背景图（随机）与立绘框的学联背景：都放在 data/ 下，不再放 frontend/static/
+#   data/bg/      → /bg/<文件名>
+#   data/nation/  → /nation/<文件名>
+# 想放别处就设环境变量 ARMSBANK_BG_DIR / ARMSBANK_NATION_DIR
+BG_DIR = os.environ.get("ARMSBANK_BG_DIR") or os.path.join(BASE_DIR, "data", "bg")
+NATION_DIR = os.environ.get("ARMSBANK_NATION_DIR") or os.path.join(BASE_DIR, "data", "nation")
+
+
+@app.get("/bg/<path:filename>")
+def bg_file(filename: str):
+    """页面随机背景图（webp，放在 data/bg）。"""
+    if not os.path.isdir(BG_DIR):
+        return jsonify({"error": f"背景图目录不存在：{BG_DIR}"}), 404
+    return send_from_directory(BG_DIR, filename, max_age=604800)
+
+
+@app.get("/nation/<path:filename>")
+def nation_file(filename: str):
+    """角色立绘框的学联背景（webp，放在 data/nation）。"""
+    if not os.path.isdir(NATION_DIR):
+        return jsonify({"error": f"学联背景目录不存在：{NATION_DIR}"}), 404
+    return send_from_directory(NATION_DIR, filename, max_age=604800)
 
 
 @app.get("/enemy_art/<path:filename>")
@@ -1229,6 +1257,129 @@ def api_overview():
                     "frameworks_ready": bool(frameworks_ok),
                     "enemies_ready": bool(enemies_ok),
                     "azbans_ready": bool(azbans_ok)})
+
+
+# ---------------------------------------------------------------- 图表数据
+# 只统计角色 / 机体 / 专属阿兹班石；敌人、框架、插件、通用阿兹班石不参与。
+
+NATION_ORDER = ["黑十字帝国学联", "王立白蔷薇学联", "星尘联邦学联",
+                "红十月同盟学联", "极东重钢学联", "维修会"]
+BODY_ORDER = ["轻型", "中型", "重型"]
+
+
+def _main_nation(raw) -> str:
+    """「红十月同盟学联（可选：星尘联邦学联/维修会）」只取括号前的主学联。"""
+    text = str(raw or "").split("（")[0].split("(")[0].strip()
+    return text or "未知"
+
+
+def _ordered(counter, order=()) -> list[dict]:
+    """按给定顺序在前，其余按数量从多到少排在后面。"""
+    head = [{"label": k, "value": counter[k]} for k in order if k in counter]
+    rest = sorted(((k, v) for k, v in counter.items() if k not in order),
+                  key=lambda kv: (-kv[1], str(kv[0])))
+    return head + [{"label": k, "value": v} for k, v in rest]
+
+
+@app.get("/api/stats")
+def api_stats():
+    from collections import Counter, defaultdict
+
+    with get_conn() as conn:
+        cur = conn.cursor()
+        chars = cur.execute(
+            """
+            SELECT c.charid, c.name, c.rarity, c.affiliation,
+                   (SELECT max(ax.arms_type) FROM arms ax WHERE ax.charid = c.charid) AS arms_type,
+                   (SELECT max(ax.size)      FROM arms ax WHERE ax.charid = c.charid) AS body
+            FROM characters c
+            """
+        ).fetchall()
+        arms_total = cur.execute("SELECT count(*) AS n FROM arms").fetchone()["n"]
+
+        ammo_rows = []
+        if ensure_arms_ammo_table(conn):
+            ammo_rows = cur.execute(
+                """
+                SELECT DISTINCT ax.charid, m.ammo
+                FROM arms ax JOIN arms_ammo m ON m.armsid = ax.armsid
+                """
+            ).fetchall()
+
+        ex_rows = []
+        if ensure_azbans_table(conn):
+            ex_rows = cur.execute(
+                """
+                SELECT z.base_name, z.char_name, ax.charid, c.affiliation
+                FROM azbans z
+                LEFT JOIN arms ax       ON ax.armsid = z.arms_id
+                LEFT JOIN characters c  ON c.charid  = ax.charid
+                WHERE z.exclusive = 1
+                """
+            ).fetchall()
+
+    # —— 角色：学联 / 体型 / 兵种 / 稀有度 / 学联×体型
+    nation_c, body_c, type_c, rarity_c = Counter(), Counter(), Counter(), Counter()
+    nation_body: dict[str, Counter] = defaultdict(Counter)
+    nation_total: Counter = Counter()
+    for ch in chars:
+        nation = _main_nation(ch["affiliation"])
+        body = (ch["body"] or "").strip() or "未知"
+        nation_c[nation] += 1
+        nation_total[nation] += 1
+        body_c[body] += 1
+        type_c[(ch["arms_type"] or "").strip() or "未知"] += 1
+        nation_body[nation][body] += 1
+        if ch["rarity"] is not None:
+            rarity_c[int(ch["rarity"])] += 1
+
+    nations = [d["label"] for d in _ordered(nation_c, NATION_ORDER)]
+    bodies = [d["label"] for d in _ordered(body_c, BODY_ORDER)]
+    stacked = {
+        "categories": nations,
+        "series": [{"name": b, "values": [nation_body[n].get(b, 0) for n in nations]}
+                   for b in bodies],
+    }
+
+    rarity = [{"label": "★" * r, "value": rarity_c[r]} for r in sorted(rarity_c, reverse=True)]
+
+    # —— 弹药：一个角色带哪几种弹就在哪几种上各算一次
+    ammo_c = Counter(r["ammo"] for r in ammo_rows if r["ammo"])
+    ammo = _ordered(ammo_c, AMMO_ORDER)
+
+    # —— 专属阿兹班石：按「持有者所在学联」统计
+    by_name = {ch["name"]: ch for ch in chars}
+    ex_stones: dict[str, set] = defaultdict(set)
+    ex_chars: dict[str, set] = defaultdict(set)
+    for r in ex_rows:
+        aff = r["affiliation"] or (by_name.get(r["char_name"]) or {}).get("affiliation")
+        nation = _main_nation(aff)
+        ex_stones[nation].add(r["base_name"])
+        ex_chars[nation].add(r["charid"] or r["char_name"])
+
+    ex_nations = [n for n in NATION_ORDER if n in ex_chars] + sorted(
+        (n for n in ex_chars if n not in NATION_ORDER), key=lambda n: -len(ex_chars[n]))
+    ex_by_nation = [{"label": n, "value": len(ex_chars[n]), "extra": f"{len(ex_stones[n])} 颗"}
+                    for n in ex_nations]
+    ex_coverage = [{"label": n, "total": nation_total.get(n, 0), "with_ex": len(ex_chars.get(n, ()))}
+                   for n in nations]
+
+    return jsonify({
+        "totals": {
+            "characters": len(chars),
+            "arms": arms_total,
+            "exclusive_stones": sum(len(v) for v in ex_stones.values()),
+            "exclusive_chars": sum(len(v) for v in ex_chars.values()),
+        },
+        "nation": _ordered(nation_c, NATION_ORDER),
+        "body": _ordered(body_c, BODY_ORDER),
+        "arms_type": _ordered(type_c),
+        "rarity": rarity,
+        "ammo": ammo,
+        "nation_body": stacked,
+        "ex_by_nation": ex_by_nation,
+        "ex_coverage": ex_coverage,
+    })
 
 
 @app.get("/api/jobs")
@@ -1294,6 +1445,36 @@ def api_azbans():
             body_rank.get(it["body"], 9),
             it["base"]))
     return jsonify(data)
+
+
+@app.get("/api/skill")
+def api_skill():
+    """按技能名取一条效果说明：阿兹班石抽屉里点技能名时用。数据在 azban_skills 表。"""
+    name = (request.args.get("name") or "").strip()
+    if not name:
+        return jsonify({"found": False, "error": "缺少 name"}), 400
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT name, description, ap, cp, damage, target"
+                " FROM azban_skills WHERE name = %s", (name,)).fetchone()
+    except DBError:
+        return jsonify({"found": False, "name": name, "hint": "数据库没配好，读不到技能效果。"})
+    except psycopg.Error:
+        return jsonify({"found": False, "name": name,
+                        "hint": "库里还没有 azban_skills 表：跑一次 backend/sql/06_azban_skills.sql。"})
+    if not row:
+        return jsonify({"found": False, "name": name,
+                        "hint": "这张表里没有这个技能名。"})
+    return jsonify({
+        "found": True,
+        "name": row["name"],
+        "desc": row["description"] or "",
+        "ap": row["ap"] or 0,
+        "cp": row["cp"] or 0,
+        "dmg": row["damage"] or 0,
+        "target": row["target"] or "",
+    })
 
 
 @app.get("/api/search")

@@ -10,7 +10,7 @@
   (function () {
     var KEY = 'armsbank-theme';
     var root = document.documentElement;
-    var base = {{ url_for('static', filename='bg/')|tojson }};
+    var base = '/bg/';   // 由后端从 data/bg/ 提供
     var POOLS = {
       light: ['BG_Light_0', 'BG_Light_1', 'BG_Light_2', 'BG_Light_3', 'BG_Light_4', 'bg_light_站点本地_'],
       dark:  ['BG_Dark_0', 'BG_Dark_1', 'BG_Dark_2', 'BG_Dark_3', 'bg_dark_站点本地_']
@@ -52,6 +52,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/">ArmsBank</a>
+    <a class="navlink" href="/stats">格纳库统计</a>
     <form class="search" id="searchForm" role="search" autocomplete="off">
       <input id="q" type="search" spellcheck="false" autocomplete="off">
       <button type="submit">搜索</button>

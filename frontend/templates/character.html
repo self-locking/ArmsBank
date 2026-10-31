@@ -140,7 +140,7 @@ function skillBlock(title, list, note) {
 
 /* ---------------- 立绘框背景：按学联 ---------------- */
 
-// 背景图放在 static/nation/ 下，文件名 = 下面的值 + .webp
+// 背景图放在 data/nation/ 下（后端以 /nation/ 提供），文件名 = 下面的值 + .webp
 const NATION_BG = {
   '黑十字帝国学联': '背景黑十字',
   '王立白蔷薇学联': '背景王立',
@@ -256,7 +256,6 @@ function paintArm() {
     skillBlock('技能', (arm.skills && arm.skills.other) || [])
   );
 
-  portraitKind = 'normal';
   paintPortrait();
 
   const first = arm.job_ids.map((id) => DATA.jobs[id]).find(Boolean);
@@ -282,8 +281,8 @@ function render(data) {
 
   if (data.equip_ready === false) {
     detail.appendChild(el('p', 'banner',
-      '兵装表 arms_equip 还没建：现在只能显示本体值（职能的 5 个百分比因此是 0 效果）。'
-      + '跑一次 setup_arms_equip.sql 后刷新即可。'));
+      '查询失败'
+      + '兵装数据未就绪'));
   }
 
   const box = el('header', 'chead');
@@ -329,7 +328,7 @@ function render(data) {
   if (bgName) {
     portraitBtn.classList.add('nbg');
     portraitBtn.style.setProperty('--nbg',
-      'url("/static/nation/' + encodeURIComponent(bgName) + '.webp")');
+      'url("/nation/' + encodeURIComponent(bgName) + '.webp")');
   }
   portraitImg = document.createElement('img');
   portraitImg.decoding = 'async';

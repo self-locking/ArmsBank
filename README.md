@@ -21,7 +21,8 @@ armsbank_app/
 │     ├─ 02_arms_equip.sql      arms_equip 建表 + 552 行
 │     ├─ 03_arms_images.sql     arms_images 建表 + 552 行
 │     ├─ 04_arms_skills.sql     arms_skills 建表 + 6833 行
-│     └─ 05_plugins_frameworks.sql  plugins + frameworks 建表与灌数
+│     ├─ 05_plugins_frameworks.sql  plugins + frameworks 建表与灌数
+│     └─ 06_azban_skills.sql      azban_skills 建表 + 317 条阿兹班石技能效果
 ├─ frontend/                    ← 前端
 │  ├─ templates/                base.html / index.html / character.html
 │  └─ static/app.css            全部样式
@@ -75,6 +76,7 @@ psql -d armsbank_db -U postgres -f backend/sql/02_arms_equip.sql
 psql -d armsbank_db -U postgres -f backend/sql/03_arms_images.sql
 psql -d armsbank_db -U postgres -f backend/sql/04_arms_skills.sql
 psql -d armsbank_db -U postgres -f backend/sql/05_plugins_frameworks.sql
+psql -d armsbank_db -U postgres -f backend/sql/06_azban_skills.sql
 ```
 
 脚本结尾自带自检，正常情况下应输出：
@@ -90,6 +92,7 @@ psql -d armsbank_db -U postgres -f backend/sql/05_plugins_frameworks.sql
 | arms_skills | 6833 |
 | plugins | 75（15 个基础名 × 5 档） |
 | frameworks | 109（33 个基础名） |
+| azban_skills | 317（阿兹班石涉及的技能名） |
 
 > 敌人两张表（`enemies` / `enemy_skills`）没放进 sql/——5265 行 INSERT 太笨重。
 > 它们和其它「后建表」一样，**第一次访问敌人分区时由 CSV 自动建表灌数**，见方式 B。
@@ -186,7 +189,7 @@ set ARMSBANK_IMAGE_DIR=C:\path\to\arms_images\images
 - **插件**：卡片上只标等级 **+N**（类型不放在卡片上），副标题是属性加成；点开抽屉才看到「类型 N（颜色）· 等级 +N」，下面列 7 类百分比加成（命中/机动/幸运/装甲/贯通/暴击概率/暴击伤害）与说明。等级就是插到框架上贡献的那个 +N，**与名字里的 Ⅰ~Ⅴ 无关**（狂热Ⅰ 是 1、英勇Ⅰ 是 2、愤怒Ⅰ 是 0）。
 - **框架**：固定 5 格插槽，每格标它**限定装哪一类插件**（`0` = 不限类型，任选）；下面是**升级阶梯**——第 Ⅰ/Ⅱ/Ⅲ 级各自要求「某类插件的等级累计到多少」，插满够数就升级，级数上限 = 阶梯行数。再往下是附带被动技能名和完整的被动效果文本。
 - **敌人**：以上三类之外还有一个「敌人」分区，495 组 / 5265 条（同名不同 Lv 合成一张卡，卡上标「N 型」和最高 Lv）。搜索**只匹配名称**（子串，不分大小写）。抽屉里是战斗贴图 + 9 项数值（生命值/装甲/机动/对地火力/对空火力/命中/贯通/幸运/反应值）+ 主动/被动技能（名字、AP/CP、描述），顶部「型号」下拉切 Lv。
-- **阿兹班石**：74 组 / 90 条。通用石在卡上标「体型 + 兵种」（如「重型 · 战斗机」），专属石标「专属 · 角色名」；同名不同档（`LF-α/β/θ型`）合成一张卡，卡上标「N 型」。抽屉里用 α/β/θ 按钮切档，下面是 11 项属性加成、替换技能（`旧 → 新`）、新增技能，以及「专属：某机体」/「通用：某体型某兵种」的适用范围。
+- **阿兹班石**：74 组 / 90 条。通用石在卡上标「体型 + 兵种」（如「重型 · 战斗机」），专属石标「专属 · 角色名」；同名不同档（`LF-α/β/θ型`）合成一张卡，卡上标「N 型」。抽屉里用 α/β/θ 按钮切档，下面是 11 项属性加成、替换技能（`旧 → 新`）、新增技能，以及「专属：某机体」/「通用：某体型某兵种」的适用范围。**技能名可以直接点**——旧技能、新技能、新增技能都能点，点一下就地展开效果原文（带 AP / CP / 伤害 / 目标），再点收起；效果原文存在 `azban_skills` 表里（由 `sql/06_azban_skills.sql` 建）。
 - **角色库分组筛选**：只有角色分区顶部有筛选条，四个维度 **学联 / 体型 / 兵种 / 弹药**。点其中一个维度会展开它的取值（每个值后面是当前结果里符合条件的角色数），点某个值，下面的卡片立刻只剩这类角色；再点别的维度可以继续叠加，范围越缩越小。选中的维度会变蓝并显示当前值，右侧出现「清除筛选」一键回到全部；点空白处收起展开的面板。筛选条件会写进地址栏（`?nation=红十月同盟学联`），直接分享就是这个筛选视图。
   搜索与筛选是叠加关系：先按关键词搜，再在结果里按维度缩小；清掉筛选不会清掉搜索词。角色分区一次取满 600 条（266 个角色全在手里），所以筛选、计数都是即时的，不再发请求。
 
@@ -364,7 +367,7 @@ CREATE INDEX characters_name_trgm ON characters USING gin (name gin_trgm_ops);
 | 复合主键 | `arms_jobs(armsid, jobid)` | 机体 → 职能的关联 |
 | 普通索引 | `arms(charid)` | 按角色取全部机体（原型/改型/特改型） |
 
-## 十、数据表清单（13 张）
+## 十、数据表清单（14 张）
 
 ### 总览
 
@@ -383,9 +386,11 @@ CREATE INDEX characters_name_trgm ON characters USING gin (name gin_trgm_ops);
 | 11 | `enemy_skills` | 敌人技能字典 | 2052 | 启动自动建（`data/armsbank_敌人技能表.csv`） |
 | 12 | `azbans` | 阿兹班石 | 90 | 启动自动建（`data/armsbank_阿兹班石表.csv`） |
 | 13 | `arms_ammo` | 机体 × 弹药 | 730 | 启动自动建（`data/armsbank_机体弹药表.csv`） |
+| 14 | `azban_skills` | 阿兹班石技能效果 | 317 | `sql/06_azban_skills.sql` |
 
 > `enemies` 的 5265 行是 495 个基础名 × 若干等级 / 型号；`azbans` 的 90 条是 15 组通用石（31 条）+ 59 张专属石。
-> 行数以 `data/` 里的 CSV 为准，SQL 脚本结尾和 `test_stub.py` 都会自检。
+> 行数以 `data/` 里的 CSV 和 SQL 脚本为准，每个 `sql/*.sql` 结尾都带自检。
+> `azban_skills` 只由 06 脚本建（应用不会自动建它），因为它的数据直接写在 SQL 里，没有对应 CSV。
 
 ### 字段
 
@@ -451,6 +456,11 @@ CREATE INDEX characters_name_trgm ON characters USING gin (name gin_trgm_ops);
 #### 13. `arms_ammo` —— 机体 × 弹药（复合主键 `(armsid, ammo)`）
 
 一台机体最多两种弹，所以独立成小表，`characters` 里不存弹药。`ammo` ∈ 通常弹 / 穿甲弹 / 高爆弹 / 燃烧弹。
+
+#### 14. `azban_skills` —— 阿兹班石技能效果（主键 `name`，text）
+
+`name`（技能名，唯一）· `description`（效果原文）· `ap` · `cp` · `damage`（伤害 %）· `target`（目标）
+阿兹班石「替换技能」的新旧名字和「新增技能」都在这里，前端点技能名时按名字查这一行。
 
 ### 关系
 

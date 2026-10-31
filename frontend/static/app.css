@@ -204,7 +204,8 @@ a { color: var(--accent); text-decoration: none; }
   gap: 1px;
   margin-top: 12px;
   overflow: hidden;
-  background: var(--line);
+  /* background: var(--line); */
+  background: transparent;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
@@ -1168,3 +1169,135 @@ html[data-theme="dark"] .drawer.typed .statline {
 }
 html[data-theme="dark"] .drawer.typed .statline .sv { color: color-mix(in srgb, var(--tc) 50%, #fff); }
 html[data-theme="dark"] .drawer.typed .dtext { background: color-mix(in srgb, var(--tc) 11%, #1b212b); }
+
+/* 阿兹班石：技能名可点，点开就地展开效果 */
+.skill-link {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.skill-link:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+.az-old.skill-link { text-decoration: line-through; }
+.az-old.skill-link:hover { text-decoration: line-through underline dotted; }
+.azadd { border: 0; cursor: pointer; }
+.azskill-desc {
+  flex-basis: 100%;
+  width: 100%;
+  margin: 5px 0 2px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #3c4553;
+  background: #f6f8fb;
+  border-left: 3px solid var(--accent, #2b6cb0);
+  border-radius: 0 6px 6px 0;
+  white-space: pre-wrap;
+}
+.azskill-meta { display: block; margin-top: 4px; font-size: 11.5px; font-weight: 400; color: var(--muted); }
+
+/* 阿兹班石技能效果展开框：黑夜模式适配 */
+html[data-theme="dark"] .azskill-desc {
+  color: #c4cad6;
+  background: rgba(79, 144, 234, .10);
+  border-left-color: var(--accent);
+}
+html[data-theme="dark"] .azskill-meta { color: var(--muted); }
+html[data-theme="dark"] .az-arrow { color: #667085; }
+
+/* =====================================================================
+   图表页（/stats）+ 顶栏「图表」链接
+   ===================================================================== */
+.navlink {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #4a5160;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background .15s, color .15s;
+}
+.navlink:hover { color: var(--accent); background: var(--accent-soft); text-decoration: none; }
+html[data-theme="dark"] .navlink { color: #c4cad6; }
+html[data-theme="dark"] .navlink:hover { color: #fff; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, .86);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(1.5px);
+}
+.tile-n { font-size: 28px; font-weight: 800; line-height: 1.1; color: var(--accent); }
+.tile-l { font-size: 12.5px; color: var(--muted); }
+
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+.chart-card {
+  padding: 16px 18px 18px;
+  background: rgba(255, 255, 255, .86);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(1.5px);
+  min-width: 0;
+}
+.chart-card.wide { grid-column: 1 / -1; }
+.chart-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; font-size: 15px; }
+.chart-sub { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+
+/* 圆环 */
+.donut-box { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.donut { width: 200px; height: 200px; flex: 0 0 auto; }
+.donut .slice { cursor: pointer; transition: opacity .15s, stroke-width .15s; }
+.donut .slice.dim { opacity: .28; }
+.dn-num { font-size: 30px; font-weight: 800; fill: var(--text); }
+.dn-lab { font-size: 11px; fill: var(--muted); }
+.legend { flex: 1; min-width: 190px; margin: 0; padding: 0; list-style: none; }
+.lg-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 13px; transition: opacity .15s, background .15s; }
+.lg-row:hover { background: var(--accent-soft); }
+.lg-row.dim { opacity: .35; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+.lg-name { flex: 1; min-width: 0; }
+.lg-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.lg-pct { width: 42px; text-align: right; color: var(--muted); font-size: 12px; }
+.lg-extra { color: var(--muted); font-size: 11.5px; }
+
+/* 柱状 */
+.bars, .stack { display: flex; flex-direction: column; gap: 7px; }
+.brow { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.bname { flex: 0 0 104px; text-align: right; color: #4a5160; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btrack { position: relative; flex: 1; height: 20px; display: flex; background: transparent; border-radius: 5px; overflow: hidden; }
+.bfill { display: block; height: 100%; background: var(--accent); border-radius: 5px; min-width: 2px; transition: width .4s ease-out; }
+.bval { flex: 0 0 auto; min-width: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bpct { flex: 0 0 44px; text-align: right; color: var(--muted); font-size: 12px; }
+
+.stack-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 6px; font-size: 12.5px; }
+.sl-item { display: inline-flex; align-items: center; gap: 6px; }
+.stack-track { background: transparent; }
+.seg { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 11.5px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+
+.cov-track { background: transparent; }
+.cov-outer { display: block; height: 100%; background: rgba(120, 130, 150, .18); border-radius: 5px; overflow: hidden; }
+.cov-inner { display: block; height: 100%; border-radius: 5px; }
+
+@media (max-width: 560px) {
+  .chart-grid { grid-template-columns: 1fr; }
+  .bname { flex-basis: 78px; }
+}
+
+/* 黑夜模式 */
+html[data-theme="dark"] .tile,
+html[data-theme="dark"] .chart-card { background: rgba(27, 33, 43, .82); }
+html[data-theme="dark"] .bname { color: #c4cad6; }
+html[data-theme="dark"] .btrack { background: transparent; }
+html[data-theme="dark"] .cov-outer { background: rgba(160, 175, 200, .20); }

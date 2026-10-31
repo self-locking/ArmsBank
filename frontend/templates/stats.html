@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}ArmsBank · 数据图表{% endblock %}
+
+{% block main %}
+  <p class="crumb"><a href="/">← 返回搜索</a></p>
+  <div id="stats"><p class="empty">读取中……</p></div>
+{% endblock %}
+
+{% block script %}
+<script>
+const form = document.getElementById('searchForm');
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = document.getElementById('q').value.trim();
+  location.href = q ? '/?q=' + encodeURIComponent(q) : '/';
+});
+
+const box = document.getElementById('stats');
+const NS = 'http://www.w3.org/2000/svg';
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+function svgEl(tag, attrs) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+/* ---------------- 配色 ---------------- */
+
+const NATION_COLORS = {
+  '黑十字帝国学联': '#7a8394',
+  '王立白蔷薇学联': '#e07a9a',
+  '星尘联邦学联': '#4f9fe6',
+  '红十月同盟学联': '#d9534f',
+  '极东重钢学联': '#e0a03a',
+  '维修会': '#5fbf7a',
+};
+const BODY_COLORS = { '轻型': '#5fbf7a', '中型': '#e0a03a', '重型': '#d9534f' };
+const PALETTE = ['#4f90ea', '#e0a03a', '#5fbf7a', '#d9534f', '#9b6bd3',
+                 '#3fb8c4', '#e07a9a', '#b5a642', '#5b7fd1', '#8d96a8'];
+
+function colorOf(label, i, kind) {
+  if (label === '未知') return '#8d96a8';
+  if (kind === 'nation' && NATION_COLORS[label]) return NATION_COLORS[label];
+  if (kind === 'body' && BODY_COLORS[label]) return BODY_COLORS[label];
+  return PALETTE[i % PALETTE.length];
+}
+const sum = (arr) => arr.reduce((s, v) => s + v, 0);
+function pct(v, t) {
+  if (!t) return '0%';
+  const p = v * 100 / t;
+  return p.toFixed(p >= 10 ? 0 : 1) + '%';
+}
+
+/* ---------------- 圆环图 ---------------- */
+
+function polar(cx, cy, r, a) { return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+
+function donut(data, kind, centerLabel) {
+  const total = sum(data.map((d) => d.value));
+  const wrap = el('div', 'donut-box');
+  const svg = svgEl('svg', { viewBox: '0 0 200 200', class: 'donut' });
+  const cx = 100, cy = 100, r = 76, sw = 32;
+
+  const num = svgEl('text', { x: cx, y: cy + 2, 'text-anchor': 'middle', class: 'dn-num' });
+  const lab = svgEl('text', { x: cx, y: cy + 22, 'text-anchor': 'middle', class: 'dn-lab' });
+  const setCenter = (n, l) => { num.textContent = n; lab.textContent = l; };
+  setCenter(String(total), centerLabel || '合计');
+
+  const legend = el('ul', 'legend');
+  const slices = [], rows = [];
+  const highlight = (idx) => {
+    slices.forEach((s, j) => s.classList.toggle('dim', idx != null && j !== idx));
+    rows.forEach((s, j) => s.classList.toggle('dim', idx != null && j !== idx));
+    if (idx == null) setCenter(String(total), centerLabel || '合计');
+    else setCenter(String(data[idx].value), pct(data[idx].value, total) + ' · ' + data[idx].label);
+  };
+
+  let a0 = -Math.PI / 2;
+  data.forEach((d, i) => {
+    const color = colorOf(d.label, i, kind);
+    const frac = total ? d.value / total : 0;
+    const a1 = a0 + frac * Math.PI * 2;
+    let node;
+    if (data.length === 1 || frac > 0.9999) {
+      node = svgEl('circle', { cx, cy, r, fill: 'none', stroke: color, 'stroke-width': sw });
+    } else {
+      const pad = Math.min(0.02, (a1 - a0) / 3);
+      const s = polar(cx, cy, r, a0 + pad), e = polar(cx, cy, r, a1 - pad);
+      node = svgEl('path', {
+        d: `M ${s[0]} ${s[1]} A ${r} ${r} 0 ${(a1 - a0) > Math.PI ? 1 : 0} 1 ${e[0]} ${e[1]}`,
+        fill: 'none', stroke: color, 'stroke-width': sw,
+      });
+    }
+    node.setAttribute('class', 'slice');
+    const tip = svgEl('title', {});
+    tip.textContent = `${d.label}：${d.value}（${pct(d.value, total)}）` + (d.extra ? ` · ${d.extra}` : '');
+    node.appendChild(tip);
+    node.addEventListener('mouseenter', () => highlight(i));
+    node.addEventListener('mouseleave', () => highlight(null));
+    svg.appendChild(node);
+    slices.push(node);
+    a0 = a1;
+
+    const li = el('li', 'lg-row');
+    const sw2 = el('i', 'sw'); sw2.style.background = color;
+    li.append(sw2, el('span', 'lg-name', d.label), el('span', 'lg-val', String(d.value)),
+              el('span', 'lg-pct', pct(d.value, total)));
+    if (d.extra) li.appendChild(el('span', 'lg-extra', d.extra));
+    li.addEventListener('mouseenter', () => highlight(i));
+    li.addEventListener('mouseleave', () => highlight(null));
+    legend.appendChild(li);
+    rows.push(li);
+  });
+  svg.append(num, lab);
+  wrap.append(svg, legend);
+  return wrap;
+}
+
+/* ---------------- 横向柱状图 ---------------- */
+
+function bars(data, kind) {
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const total = sum(data.map((d) => d.value));
+  const list = el('div', 'bars');
+  data.forEach((d, i) => {
+    const row = el('div', 'brow');
+    row.title = `${d.label}：${d.value}（${pct(d.value, total)}）`;
+    const track = el('span', 'btrack');
+    const fill = el('span', 'bfill');
+    fill.style.width = (d.value / max * 100) + '%';
+    if (kind) fill.style.background = colorOf(d.label, i, kind);
+    track.appendChild(fill);
+    row.append(el('span', 'bname', d.label), track,
+               el('span', 'bval', String(d.value)), el('span', 'bpct', pct(d.value, total)));
+    list.appendChild(row);
+  });
+  return list;
+}
+
+/* ---------------- 堆叠柱状图（学联 × 体型） ---------------- */
+
+function stacked(cats, series, catKind, serKind) {
+  const totals = cats.map((_, i) => sum(series.map((s) => s.values[i])));
+  const max = Math.max(1, ...totals);
+  const wrap = el('div', 'stack');
+
+  const legend = el('div', 'stack-legend');
+  series.forEach((s, j) => {
+    const item = el('span', 'sl-item');
+    const sw = el('i', 'sw'); sw.style.background = colorOf(s.name, j, serKind);
+    item.append(sw, el('span', '', s.name));
+    legend.appendChild(item);
+  });
+  wrap.appendChild(legend);
+
+  cats.forEach((c, i) => {
+    const row = el('div', 'brow');
+    const track = el('span', 'btrack stack-track');
+    series.forEach((s, j) => {
+      const v = s.values[i];
+      if (!v) return;
+      const seg = el('span', 'seg', v >= max * 0.06 ? String(v) : '');
+      seg.style.width = (v / max * 100) + '%';
+      seg.style.background = colorOf(s.name, j, serKind);
+      seg.title = `${c} · ${s.name}：${v}`;
+      track.appendChild(seg);
+    });
+    row.append(el('span', 'bname', c), track, el('span', 'bval', String(totals[i])));
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+/* ---------------- 覆盖率（有专属石的角色 / 该学联角色总数） ---------------- */
+
+function coverage(rows) {
+  const max = Math.max(1, ...rows.map((r) => r.total));
+  const list = el('div', 'bars');
+  rows.forEach((r, i) => {
+    const row = el('div', 'brow');
+    row.title = `${r.label}：${r.with_ex} / ${r.total}`;
+    const track = el('span', 'btrack cov-track');
+    track.style.width = '100%';
+    const outer = el('span', 'cov-outer');
+    outer.style.width = (r.total / max * 100) + '%';
+    const inner = el('span', 'cov-inner');
+    inner.style.width = (r.total ? r.with_ex / r.total * 100 : 0) + '%';
+    inner.style.background = colorOf(r.label, i, 'nation');
+    outer.appendChild(inner);
+    track.appendChild(outer);
+    row.append(el('span', 'bname', r.label), track,
+               el('span', 'bval', `${r.with_ex} / ${r.total}`), el('span', 'bpct', pct(r.with_ex, r.total)));
+    list.appendChild(row);
+  });
+  return list;
+}
+
+/* ---------------- 页面 ---------------- */
+
+function card(title, sub, body, wide) {
+  const c = el('section', 'chart-card' + (wide ? ' wide' : ''));
+  const h = el('h3', 'chart-title', title);
+  if (sub) h.appendChild(el('span', 'chart-sub', sub));
+  c.appendChild(h);
+  c.appendChild(body);
+  return c;
+}
+function emptyOr(data, make) {
+  return (!data || !data.length) ? el('p', 'empty', '暂无数据') : make();
+}
+
+function render(d) {
+  box.replaceChildren();
+
+  const tiles = el('div', 'tiles');
+  const tile = (n, l) => {
+    const t = el('div', 'tile');
+    t.append(el('span', 'tile-n', String(n)), el('span', 'tile-l', l));
+    return t;
+  };
+  tiles.append(
+    tile(d.totals.characters, '角色'),
+    tile(d.totals.arms, '机体'),
+    tile(d.totals.exclusive_stones, '专属阿兹班石'),
+    tile(d.totals.exclusive_chars, '持有专属石的角色'),
+  );
+  box.appendChild(tiles);
+
+  const grid = el('div', 'chart-grid');
+  grid.append(
+    card('学联分布', '角色', emptyOr(d.nation, () => donut(d.nation, 'nation', '角色'))),
+    card('类型分布', '角色', emptyOr(d.body, () => donut(d.body, 'body', '角色'))),
+    card('兵种分布', '角色', emptyOr(d.arms_type, () => bars(d.arms_type))),
+    card('稀有度分布', '角色', emptyOr(d.rarity, () => bars(d.rarity))),
+    card('弹药类型', '带该弹药的角色数', emptyOr(d.ammo, () => bars(d.ammo))),
+    card('专属阿兹班石分布', '角色', emptyOr(d.ex_by_nation,
+      () => donut(d.ex_by_nation, 'nation', '角色'))),
+    card('各学联的类型构成', '角色', emptyOr(d.nation_body.categories,
+      () => stacked(d.nation_body.categories, d.nation_body.series, 'nation', 'body')), true),
+    card('各学联专属阿兹班石覆盖', '有专属石的角色 / 学联角色数', emptyOr(d.ex_coverage,
+      () => coverage(d.ex_coverage)), true),
+  );
+  box.appendChild(grid);
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '读取失败');
+    render(data);
+  } catch (err) {
+    box.replaceChildren(el('p', 'empty', '出错了：' + err.message));
+  }
+}
+load();
+</script>
+{% endblock %}

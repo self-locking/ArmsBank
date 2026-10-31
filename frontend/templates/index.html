@@ -1,0 +1,798 @@
+﻿{% extends "base.html" %}
+{% block title %}ArmsBank · 搜索{% endblock %}
+
+{% block main %}
+  <nav class="tabs" id="tabs" aria-label="数据分类"></nav>
+  <p class="status" id="status">正在读取……</p>
+  <div class="facets" id="facets" hidden></div>
+  <div class="results" id="results"></div>
+
+  <div class="drawer-back" id="drawerBack" hidden></div>
+  <aside class="drawer" id="drawer" hidden aria-label="条目详情"></aside>
+{% endblock %}
+
+{% block script %}
+<script>
+const input = document.getElementById('q');
+const form = document.getElementById('searchForm');
+const statusBox = document.getElementById('status');
+const resultsBox = document.getElementById('results');
+const countsBox = document.getElementById('counts');
+const tabsBox = document.getElementById('tabs');
+const facetsBox = document.getElementById('facets');
+const drawer = document.getElementById('drawer');
+const drawerBack = document.getElementById('drawerBack');
+
+const ROMAN = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ'];
+
+// 5 类插件的颜色，取自原站 Type1~5Icon2.png 的主色（红 / 黄 / 青蓝 / 绿 / 紫）
+const TYPE_COLORS = { 1: '#e03850', 2: '#d0b050', 3: '#50d0d8', 4: '#60c078', 5: '#c8a0c8' };
+const TYPE_NAMES = { 1: '红', 2: '黄', 3: '蓝', 4: '绿', 5: '紫' };
+
+function typeDot(type) {
+  const d = el('span', 'tydot');
+  d.style.background = TYPE_COLORS[type] || '#9aa4b2';
+  d.title = '类型' + type + '（' + (TYPE_NAMES[type] || '?') + '）';
+  return d;
+}
+
+const CATS = [
+  { key: 'character', label: '角色', countKey: 'characters', ph: '搜索 角色名 / 机体名 / 专属·DOLLS·改造技能名' },
+  { key: 'plugin', label: '性格插件', countKey: 'plugins', ph: '搜索 性格插件名称' },
+  { key: 'framework', label: '知性框架', countKey: 'frameworks', ph: '搜索 知性框架名称' },
+  { key: 'enemy', label: '敌人', countKey: 'enemies', ph: '搜索 敌人名称' },
+  { key: 'azban', label: '阿兹班石', countKey: 'azbans', ph: '搜索 阿兹班石名称' },
+];
+
+let cat = 'character';
+let timer = null;
+let controller = null;
+let overview = null;
+let currentGroup = null;   // 抽屉里正在看的条目
+let filters = { nation: '', body: '', arms: '', ammo: '' };  // 角色库的分组筛选：维度 -> 选中的值
+let openFacet = '';        // 哪一个维度展开着
+let lastChars = [];        // 最近一次搜索拿回来的整份角色（筛选前）
+let lastKeyword = '';
+
+// 弹药按 通常 / 穿甲 / 高爆 / 燃烧 排（只用来说明顺序）
+const AMMO_ORDER = ['通常弹', '穿甲弹', '高爆弹', '燃烧弹'];
+
+// 「红十月同盟学联（可选：星尘联邦学联/维修会）」→ 这三个学联都能选到它
+function nationValues(ch) {
+  const raw = String(ch.affiliation || '');
+  const out = [raw.split('（')[0].trim()].filter(Boolean);
+  const m = raw.match(/（\s*可选[:：]\s*([^）]+)）/);
+  if (m) {
+    for (const part of m[1].split(/[\/、,，]/)) {
+      const v = part.trim();
+      if (v && !out.includes(v)) out.push(v);
+    }
+  }
+  return out.length ? out : ['未标注'];
+}
+
+// 四个分组维度：点一下展开它的选项，选一个就把列表缩到只剩符合的
+const FACETS = [
+  { key: 'nation', label: '学联', order: ['黑十字帝国学联', '王立白蔷薇学联', '星尘联邦学联',
+    '红十月同盟学联', '极东重钢学联', '维修会'], values: nationValues },
+  { key: 'body', label: '体型', order: ['轻型', '中型', '重型'],
+    values: (ch) => [ch.body || '未标注'] },
+  { key: 'arms', label: '兵种', order: ['坦克', '歼击车', '防空炮', '火炮', '战斗机', '攻击机', '轰炸机'],
+    values: (ch) => [ch.arms_type || '未标注'] },
+  { key: 'ammo', label: '弹药', order: AMMO_ORDER,
+    values: (ch) => String(ch.ammo || '').split('/').map((s) => s.trim()).filter(Boolean) },
+];
+
+function facetOn() {
+  return FACETS.some((f) => filters[f.key]);
+}
+
+function hitFacet(f, ch) {
+  const want = filters[f.key];
+  return !want || f.values(ch).includes(want);
+}
+
+function filteredChars() {
+  return lastChars.filter((ch) => FACETS.every((f) => hitFacet(f, ch)));
+}
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function stars(n) {
+  return '★'.repeat(Math.max(0, n || 0));
+}
+
+/* ---------------- 顶部三个分区 ---------------- */
+
+function renderTabs() {
+  tabsBox.replaceChildren();
+  for (const c of CATS) {
+    const btn = el('button', 'tab' + (c.key === cat ? ' active' : ''), c.label);
+    btn.type = 'button';
+    const n = overview ? overview[c.countKey] : null;
+    btn.appendChild(el('span', 'tab-count', n != null ? String(n) : '–'));
+    btn.addEventListener('click', () => switchCat(c.key));
+    tabsBox.appendChild(btn);
+  }
+}
+
+function switchCat(key) {
+  if (key === cat) return;
+  cat = key;
+  closeDrawer();
+  renderTabs();
+  const c = CATS.find((x) => x.key === cat);
+  input.placeholder = c.ph;
+  openFacet = '';
+  renderFacets();
+  go(input.value.trim());
+}
+
+async function loadOverview() {
+  try {
+    const res = await fetch('/api/overview');
+    overview = await res.json();
+    countsBox.textContent = `${overview.characters} 角色 · ${overview.arms} 机体`
+      + (overview.plugins != null ? ` · ${overview.plugins} 插件` : '')
+      + (overview.frameworks != null ? ` · ${overview.frameworks} 框架` : '')
+      + (overview.enemies != null ? ` · ${overview.enemies} 敌人` : '')
+      + (overview.azbans != null ? ` · ${overview.azbans} 阿兹班石` : '');
+  } catch (err) {
+    countsBox.textContent = '';
+  }
+  renderTabs();
+}
+
+/* ---------------- URL ---------------- */
+
+function syncUrl(keyword) {
+  const p = new URLSearchParams();
+  if (cat !== 'character') p.set('cat', cat);
+  if (cat === 'character') {
+    for (const f of FACETS) if (filters[f.key]) p.set(f.key, filters[f.key]);
+  }
+  if (keyword) p.set('q', keyword);
+  const qs = p.toString();
+  history.replaceState(null, '', qs ? '/?' + qs : '/');
+}
+
+/* ---------------- 角色列表 ---------------- */
+
+function buildRow(ch, keyword) {
+  const a = document.createElement('a');
+  a.className = 'card' + (ch.name_matched ? ' namehit' : '');
+  a.href = '/c/' + encodeURIComponent(ch.charid)
+    + (keyword ? '?q=' + encodeURIComponent(keyword) : '');
+
+  const line = el('div', 'card-line');
+  line.appendChild(el('span', 'stars', stars(ch.rarity)));
+  line.appendChild(el('span', 'cname', ch.name || ch.charid));
+
+  const metaBits = [ch.affiliation, ch.college, ch.number].filter(Boolean);
+  if (metaBits.length) line.appendChild(el('span', 'meta', metaBits.join(' · ')));
+  line.appendChild(el('span', 'pill', (ch.arms_count != null ? ch.arms_count : ch.arms.length) + ' 机体'));
+  a.appendChild(line);
+
+  if (ch.arms.length) {
+    const arms = el('div', 'arms-line');
+    ch.arms.forEach((arm, i) => {
+      if (i) arms.appendChild(document.createTextNode(' · '));
+      const label = (arm.name || arm.armsid) + (arm.variant && arm.variant !== '原型' ? '（' + arm.variant + '）' : '');
+      arms.appendChild(el('span', arm.matched ? 'hit' : '', label));
+    });
+    a.appendChild(arms);
+  }
+
+  // 技能名命中（专属 / DOLLS / 改造）—— 点了照样进角色页
+  const skills = ch.skill_matched || [];
+  if (skills.length) {
+    const line2 = el('div', 'skill-line');
+    line2.appendChild(el('span', 'skill-tag', '技能'));
+    skills.slice(0, 4).forEach((hit) => {
+      line2.appendChild(el('span', 'skill-hit', hit.kind + ' · ' + hit.name));
+    });
+    if (skills.length > 4) line2.appendChild(el('span', 'meta', '等 ' + skills.length + ' 个'));
+    a.appendChild(line2);
+  }
+  return a;
+}
+
+/* ---------------- 插件 / 框架卡片 ---------------- */
+
+function buildItemCard(group) {
+  const card = el('button', 'item-card');
+  card.type = 'button';
+
+  const line = el('div', 'card-line');
+  // 阿兹班石没有稀有度（rarity 恒为 0），别留一个空星标占位
+  if (group.rarity) line.appendChild(el('span', 'stars', stars(group.rarity)));
+  line.appendChild(el('span', 'cname', group.name));
+  if (cat === 'plugin' && group.level != null) line.appendChild(el('span', 'pplus', '+' + group.level));
+
+  const bits = [];
+  if (group.tier_count > 1) bits.push(group.tier_count + ' 档');
+  if (cat === 'framework' && group.passive) bits.push(group.passive);
+  if (cat === 'enemy') {
+    bits.push(group.variant_count + ' 型');
+    if (group.class_name) bits.push(group.class_name);
+  }
+  if (cat === 'azban') {
+    if (group.exclusive) {
+      bits.push('专属');
+      if (group.char_name) bits.push(group.char_name);
+    } else {
+      if (group.body) bits.push(group.body);
+      if (group.class_name) bits.push(group.class_name);
+    }
+  }
+  if (bits.length) line.appendChild(el('span', 'pill', bits.join(' · ')));
+  if (cat === 'enemy' && group.boss) line.appendChild(el('span', 'pill boss', 'BOSS'));
+  card.appendChild(line);
+
+  if (cat === 'plugin') {
+    const sub = el('div', 'item-sub', group.summary || '无属性加成');
+    card.appendChild(sub);
+  } else if (cat === 'enemy') {
+    const top = group.variants[0];
+    const hp = (top.stats.find((s) => s.label === '生命值') || {}).value;
+    const lvText = top.level ? `最高 Lv.${top.level}` : '';
+    card.appendChild(el('div', 'item-sub',
+      [lvText, hp ? `生命值 ${hp}` : ''].filter(Boolean).join(' · ')));
+  } else if (cat === 'azban') {
+    const top = group.variants[group.variants.length - 1];
+    const bits2 = top.stats.slice(0, 3).map((s) => `${s.label} ${s.value > 0 ? '+' : ''}${s.value}`);
+    card.appendChild(el('div', 'item-sub',
+      [...bits2, group.variant_count > 1 ? `${group.variant_count} 型` : ''].filter(Boolean).join(' · ')
+      || '无属性加成'));
+  }
+
+  card.addEventListener('click', () => openDrawer(group));
+  return card;
+}
+
+/* ---------------- 抽屉 ---------------- */
+
+function closeDrawer() {
+  drawer.hidden = true;
+  drawerBack.hidden = true;
+  document.body.classList.remove('drawer-open');
+  currentGroup = null;
+}
+
+function openDrawer(group) {
+  currentGroup = group;
+  drawer.hidden = false;
+  drawerBack.hidden = false;
+  document.body.classList.add('drawer-open');
+  paintDrawer(group, group.variants ? group.variants.length - 1 : group.tiers.length - 1);
+}
+
+function paintDrawer(group, index) {
+  if (cat === 'enemy') {
+    paintEnemyDrawer(group, index);
+    return;
+  }
+  if (cat === 'azban') {
+    paintAzbanDrawer(group, index);
+    return;
+  }
+  const tier = group.tiers[index];
+  drawer.replaceChildren();
+
+  const head = el('div', 'dhead');
+  const closeBtn = el('button', 'dclose', '✕');
+  closeBtn.type = 'button';
+  closeBtn.title = '关闭（Esc）';
+  closeBtn.addEventListener('click', closeDrawer);
+  head.appendChild(closeBtn);
+  const title = el('div', 'dtitle');
+  title.appendChild(el('span', 'stars', stars(tier.rarity)));
+  title.appendChild(el('span', 'cname', group.name));
+  head.appendChild(title);
+  drawer.appendChild(head);
+
+  // 档位切换
+  if (group.tiers.length > 1) {
+    const bar = el('div', 'tierbar');
+    group.tiers.forEach((t, i) => {
+      const b = el('button', 'tierbtn' + (i === index ? ' active' : ''), t.name.slice(-1));
+      b.type = 'button';
+      b.title = t.name;
+      b.addEventListener('click', () => paintDrawer(group, i));
+      bar.appendChild(b);
+    });
+    drawer.appendChild(bar);
+  }
+
+  const body = el('div', 'dbody');
+
+  if (cat === 'plugin') {
+    const statBox = el('div', 'statbox');
+    if (!tier.stats.length) {
+      statBox.appendChild(el('p', 'sempty', '该插件没有属性加成。'));
+    } else {
+      for (const s of tier.stats) {
+        const row = el('div', 'statline');
+        row.appendChild(el('span', 'sk', s.label));
+        row.appendChild(el('span', 'sv', '+' + s.value + s.unit));
+        statBox.appendChild(row);
+      }
+    }
+    body.appendChild(el('h4', 'dsub', '属性加成'));
+    body.appendChild(statBox);
+    body.appendChild(el('h4', 'dsub', '说明'));
+    body.appendChild(el('p', 'dtext', tier.description || '（无）'));
+  } else {
+    body.appendChild(el('h4', 'dsub', '插槽（5 格）'));
+    const slotBox = el('div', 'fwslots');
+    tier.slots.forEach((type) => {
+      const cell = el('div', 'slot' + (type ? '' : ' free'));
+      const head = el('div', 'slot-head');
+      if (type) head.appendChild(typeDot(type));
+      head.appendChild(el('span', 'slot-type', type ? String(type) : '任'));
+      cell.appendChild(head);
+      cell.appendChild(el('span', 'slot-need', type ? TYPE_NAMES[type] + '色槽' : '不限类型'));
+      if (type && TYPE_COLORS[type]) {
+        cell.style.borderColor = TYPE_COLORS[type] + '99';
+        cell.style.background = TYPE_COLORS[type] + '16';
+      }
+      slotBox.appendChild(cell);
+    });
+    body.appendChild(slotBox);
+    body.appendChild(el('p', 'dhint',
+      '数字是该格能装的插件类型——插件卡片上标的那个数；「任」是哪个类型都能插。'));
+
+    body.appendChild(el('h4', 'dsub', `升级条件（这个框架最高 ${tier.max_level} 级）`));
+    const stages = el('div', 'stages');
+    for (const s of tier.stages) {
+      const row = el('div', 'stage');
+      row.appendChild(el('span', 'stage-lv', (ROMAN[s.level - 1] || s.level) + ' 级'));
+      if (s.reqs.length) {
+        const reqBox = el('span', 'stage-req');
+        s.reqs.forEach((r, i) => {
+          if (i) reqBox.appendChild(el('span', 'stage-sep', '·'));
+          reqBox.appendChild(typeDot(r.type));
+          reqBox.appendChild(document.createTextNode(`类型${r.type} 累计 ≥ ${r.need}`));
+        });
+        row.appendChild(reqBox);
+      } else {
+        row.appendChild(el('span', 'stage-req', '无要求'));
+      }
+      stages.appendChild(row);
+    }
+    if (tier.stages.length) body.appendChild(stages);
+    body.appendChild(el('p', 'dhint',
+      '插上去的同类型插件，把各自的等级加起来达到某一行的要求，框架就升到那一级；等级越高，附带被动的那一档越强。这里的「级」是框架的强化等级，和名字里的 Ⅳ 不是一回事（那是框架本身的档位）。'));
+
+    body.appendChild(el('h4', 'dsub', '附带被动'));
+    if (tier.passive) {
+      body.appendChild(el('p', 'dpassive', tier.passive));
+    }
+    const lines = String(tier.description || '')
+      .split('\n').map((s) => s.trim())
+      .filter((line) => line && line !== tier.passive);
+    for (const line of lines) body.appendChild(el('p', 'dtext', line));
+    body.appendChild(el('p', 'dmeta',
+      `等级 ${tier.skill_level} · 需求角色等级 ${tier.char_level_req} · 物品ID ${tier.itemid}`));
+  }
+
+  if (cat === 'plugin') {
+    body.appendChild(el('p', 'dmeta',
+      `类型 ${tier.slot_type}（${TYPE_NAMES[tier.slot_type] || '?'}） · 等级 +${tier.level} · `
+      + `稀有度 ${tier.rarity} · 物品ID ${tier.itemid}`));
+  }
+
+  drawer.appendChild(body);
+  drawer.scrollTop = 0;
+}
+
+/* ---------------- 敌人抽屉 ---------------- */
+
+function paintEnemyDrawer(group, index) {
+  const v = group.variants[index];
+  drawer.replaceChildren();
+
+  const head = el('div', 'dhead');
+  const closeBtn = el('button', 'dclose', '✕');
+  closeBtn.type = 'button';
+  closeBtn.title = '关闭（Esc）';
+  closeBtn.addEventListener('click', closeDrawer);
+  head.appendChild(closeBtn);
+  const title = el('div', 'dtitle');
+  title.appendChild(el('span', 'stars', stars(group.rarity)));
+  title.appendChild(el('span', 'cname', group.name));
+  head.appendChild(title);
+  drawer.appendChild(head);
+
+  const body = el('div', 'dbody');
+
+  // 型号（同一个基础名的不同 Lv）
+  if (group.variants.length > 1) {
+    const sel = document.createElement('select');
+    sel.className = 'evariants';
+    group.variants.forEach((item, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = item.name;
+      if (i === index) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => paintEnemyDrawer(group, Number(sel.value)));
+    body.appendChild(sel);
+  }
+
+  if (v.portrait) {
+    const img = document.createElement('img');
+    img.className = 'epic';
+    img.loading = 'lazy';
+    img.alt = v.name;
+    img.src = '/enemy_art/' + encodeURIComponent(v.portrait);
+    img.addEventListener('error', () => img.remove());
+    body.appendChild(img);
+  }
+
+  const statBox = el('div', 'estats');
+  for (const s of v.stats) {
+    const cell = el('div', 'estat');
+    cell.appendChild(el('span', 'k', s.label));
+    cell.appendChild(el('span', 'v', String(s.value)));
+    statBox.appendChild(cell);
+  }
+  body.appendChild(statBox);
+
+  const active = v.skills.filter((s) => s.role === 'active');
+  const passive = v.skills.filter((s) => s.role !== 'active');
+  const skillBlock = (list, heading, withCost) => {
+    body.appendChild(el('h4', 'dsub', heading));
+    if (!list.length) {
+      body.appendChild(el('p', 'sempty', '（无）'));
+      return;
+    }
+    for (const sk of list) {
+      const box = el('div', 'eskill');
+      const row = el('div', 'eskill-name');
+      row.appendChild(el('span', '', sk.name || sk.skillid));
+      if (withCost && (sk.ap || sk.cp)) {
+        row.appendChild(el('span', 'ecost', `AP ${sk.ap} · CP ${sk.cp}`));
+      }
+      box.appendChild(row);
+      if (sk.description) box.appendChild(el('p', 'eskill-desc', sk.description));
+      body.appendChild(box);
+    }
+  };
+  skillBlock(active, `主动技能（${active.length}）`, true);
+  skillBlock(passive, `被动技能（${passive.length}）`, false);
+
+  if (v.description) body.appendChild(el('p', 'dtext', v.description));
+  body.appendChild(el('p', 'dmeta',
+    `类型 ${v.class_name || '—'}` + (v.boss ? ' · BOSS' : '')
+    + (v.level ? ` · Lv.${v.level}` : '')
+    + ` · 敌人ID ${v.enemyid}`));
+
+  drawer.appendChild(body);
+  drawer.scrollTop = 0;
+}
+
+/* ---------------- 阿兹班石抽屉 ---------------- */
+
+function paintAzbanDrawer(group, index) {
+  const v = group.variants[index];
+  const at = group.variants.length - 1;
+  drawer.replaceChildren();
+
+  const head = el('div', 'dhead');
+  const closeBtn = el('button', 'dclose', '✕');
+  closeBtn.type = 'button';
+  closeBtn.title = '关闭（Esc）';
+  closeBtn.addEventListener('click', closeDrawer);
+  head.appendChild(closeBtn);
+
+  const title = el('div', 'dtitle');
+  title.appendChild(el('span', 'cname', v.name));
+  if (group.variant_count > 1) title.appendChild(el('span', 'pill', index === at ? '最高档' : `第 ${index + 1} 档`));
+  head.appendChild(title);
+  drawer.appendChild(head);
+
+  const body = el('div', 'dbody');
+
+  if (group.variant_count > 1) {
+    const bar = el('div', 'tierbar');
+    group.variants.forEach((item, i) => {
+      // 通用石叫 LF-α型，按钮上只留 α
+      const mark = item.name.replace(/^.*-/, '').replace(/型$/, '') || String(i + 1);
+      const b = el('button', 'tierbtn' + (i === index ? ' active' : ''), mark);
+      b.type = 'button';
+      b.title = item.name;
+      b.addEventListener('click', () => paintAzbanDrawer(group, i));
+      bar.appendChild(b);
+    });
+    body.appendChild(bar);
+  }
+
+  // 适用：通用看兵种+体型，专属看绑定的机体
+  body.appendChild(el('p', 'dhint', group.exclusive
+    ? `专属：${group.char_name || '—'}（${group.arms_id || '—'}），只有这台机体能装。`
+    : `通用：${group.body || '—'}${group.class_name || '—'} 都能装。`));
+
+  body.appendChild(el('h4', 'dsub', '属性加成'));
+  const statBox = el('div', 'statbox');
+  if (!v.stats.length) {
+    statBox.appendChild(el('p', 'sempty', '这颗石头没有属性加成。'));
+  } else {
+    for (const s of v.stats) {
+      const row = el('div', 'statline');
+      row.appendChild(el('span', 'sk', s.label));
+      row.appendChild(el('span', 'sv', (s.value > 0 ? '+' : '') + s.value));
+      statBox.appendChild(row);
+    }
+  }
+  body.appendChild(statBox);
+
+  if (v.repls.length) {
+    body.appendChild(el('h4', 'dsub', `替换技能（${v.repls.length}）`));
+    for (const p2 of v.repls) {
+      const row = el('div', 'azpair');
+      row.appendChild(el('span', 'az-old', p2.old));
+      row.appendChild(el('span', 'az-arrow', '→'));
+      row.appendChild(el('span', 'az-new', p2.new));
+      body.appendChild(row);
+    }
+  }
+  if (v.adds.length) {
+    body.appendChild(el('h4', 'dsub', `新增技能（${v.adds.length}）`));
+    for (const name of v.adds) body.appendChild(el('div', 'azadd', name));
+  }
+  if (!v.repls.length && !v.adds.length) {
+    body.appendChild(el('p', 'sempty', '这颗石头不改技能，只加属性。'));
+  }
+
+  if (v.description) body.appendChild(el('p', 'dtext', v.description));
+  body.appendChild(el('p', 'dmeta',
+    (group.exclusive ? '专属 · ' : `${group.body || '—'} · ${group.class_name || '—'} · `)
+    + `返还 ${v.rebate}% · 物品ID ${v.itemid}`));
+
+  drawer.appendChild(body);
+  drawer.scrollTop = 0;
+}
+
+/* ---------------- 搜索结果 ---------------- */
+
+// 每个维度的选项计数：先算上其它维度，本维度不算（否则选中后就只剩 1 个能点了）
+function facetCounts(f) {
+  const pool = lastChars.filter((ch) => FACETS.every((g) => g.key === f.key || hitFacet(g, ch)));
+  const counts = {};
+  for (const ch of pool) for (const v of f.values(ch)) counts[v] = (counts[v] || 0) + 1;
+  return counts;
+}
+
+function orderValues(f, counts) {
+  const known = f.order.filter((v) => counts[v] != null);
+  const rest = Object.keys(counts).filter((v) => !f.order.includes(v))
+    .sort((a, b) => (counts[b] - counts[a]) || a.localeCompare(b, 'zh'));
+  return known.concat(rest);
+}
+
+function renderFacets() {
+  facetsBox.hidden = cat !== 'character';
+  facetsBox.replaceChildren();
+  if (cat !== 'character') return;
+
+  for (const f of FACETS) {
+    const wrap = el('div', 'facet');
+    const btn = el('button', 'facet-btn'
+      + (filters[f.key] ? ' on' : '') + (openFacet === f.key ? ' open' : ''));
+    btn.type = 'button';
+    btn.appendChild(el('span', 'flabel', f.label));
+    if (filters[f.key]) btn.appendChild(el('span', 'fval', filters[f.key]));
+    btn.appendChild(el('span', 'fcaret', '▾'));
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openFacet = openFacet === f.key ? '' : f.key;
+      renderFacets();
+    });
+    wrap.appendChild(btn);
+
+    if (openFacet === f.key) {
+      const menu = el('div', 'facet-menu');
+      const counts = facetCounts(f);
+      const values = orderValues(f, counts);
+      if (!values.length) menu.appendChild(el('p', 'fempty', '这次搜索里没有可选项'));
+      for (const v of values) {
+        const chip = el('button', 'fchip' + (filters[f.key] === v ? ' on' : ''));
+        chip.type = 'button';
+        chip.appendChild(el('span', 'fchip-name', v));
+        chip.appendChild(el('span', 'fchip-count', String(counts[v])));
+        chip.addEventListener('click', (e) => {
+          e.stopPropagation();
+          filters[f.key] = filters[f.key] === v ? '' : v;
+          openFacet = '';
+          applyFilters();
+        });
+        menu.appendChild(chip);
+      }
+      wrap.appendChild(menu);
+      // 展开的面板别超出窗口（靠右的维度右对齐，还不够就往回挪）
+      requestAnimationFrame(() => {
+        let box = menu.getBoundingClientRect();
+        if (box.right > window.innerWidth - 12) {
+          menu.style.left = 'auto';
+          menu.style.right = '0';
+          box = menu.getBoundingClientRect();
+        }
+        const over = 8 - box.left;
+        if (over > 0) menu.style.transform = `translateX(${Math.round(over)}px)`;
+      });
+    }
+    facetsBox.appendChild(wrap);
+  }
+
+  if (facetOn()) {
+    const clear = el('button', 'facet-clear', '清除筛选');
+    clear.type = 'button';
+    clear.addEventListener('click', (e) => {
+      e.stopPropagation();
+      filters = { nation: '', body: '', arms: '', ammo: '' };
+      openFacet = '';
+      applyFilters();
+    });
+    facetsBox.appendChild(clear);
+  }
+}
+
+// 只改筛选、不重新请求：拿已经取回来的整份结果重画
+function applyFilters() {
+  syncUrl(input.value.trim());
+  renderFacets();
+  renderCharacters(filteredChars(), lastKeyword);
+  updateStatus();
+}
+
+function updateStatus() {
+  const total = lastChars.length;
+  const shown = filteredChars().length;
+  const picks = FACETS.filter((f) => filters[f.key]).map((f) => `${f.label} ${filters[f.key]}`);
+  const head = lastKeyword ? `「${lastKeyword}」匹配 ${total} 个角色` : `共 ${total} 个角色`;
+  const mid = picks.length
+    ? `，按 ${picks.join(' · ')} 筛选后剩 ${shown} 个`
+    : `，按稀有度显示 ${shown} 个`;
+  const tail = lastKeyword
+    ? '；可搜角色名，也可搜 专属 / DOLLS / 改造 技能名。'
+    : '；输入角色名或技能名可精确查找。';
+  statusBox.textContent = head + mid + tail;
+}
+
+function renderCharacters(characters, keyword) {
+  resultsBox.replaceChildren();
+  resultsBox.className = 'results';
+  if (!characters.length) {
+    resultsBox.appendChild(el('p', 'empty', facetOn()
+      ? '当前筛选下没有角色，换个选项，或点「清除筛选」。'
+      : '没有找到匹配的角色，换个关键词试试。'));
+    return;
+  }
+  for (const ch of characters) resultsBox.appendChild(buildRow(ch, keyword));
+}
+
+function renderItems(data, keyword) {
+  resultsBox.replaceChildren();
+  resultsBox.className = 'results items';
+  if (!data.ready) {
+    resultsBox.appendChild(el('p', 'empty', '这张表还没建好：重启一次应用会自动建表，或手动跑 sql 脚本。'));
+    return;
+  }
+  if (!data.items.length) {
+    const what = cat === 'plugin' ? '性格插件'
+      : cat === 'enemy' ? '敌人'
+      : cat === 'azban' ? '阿兹班石' : '知性框架';
+    resultsBox.appendChild(el('p', 'empty', `没有找到匹配的${what}，换个关键词试试。`));
+    return;
+  }
+  for (const g of data.items) resultsBox.appendChild(buildItemCard(g));
+}
+
+async function search(keyword) {
+  if (controller) controller.abort();
+  controller = new AbortController();
+
+  statusBox.classList.remove('error');
+  statusBox.textContent = '搜索中……';
+
+  const endpoint = cat === 'character'
+    ? '/api/search?limit=600&q=' + encodeURIComponent(keyword)
+    : `/api/${cat === 'plugin' ? 'plugins' : cat === 'enemy' ? 'enemies' : cat === 'azban' ? 'azbans' : 'frameworks'}?q=`
+      + encodeURIComponent(keyword);
+
+  try {
+    const res = await fetch(endpoint, { signal: controller.signal });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '搜索失败');
+
+    if (cat === 'character') {
+      lastChars = data.characters || [];
+      lastKeyword = data.keyword || '';
+      applyFilters();
+    } else {
+      const kw = keyword;
+      const word = cat === 'plugin' ? '性格插件'
+        : cat === 'enemy' ? '敌人'
+        : cat === 'azban' ? '阿兹班石' : '知性框架';
+      const unit = cat === 'enemy' ? '个型号' : '条档位';
+      statusBox.textContent = kw
+        ? `「${kw}」匹配 ${data.count} 组${word}（${data.rows} ${unit}）；点卡片看详情。`
+        : `共 ${data.count} 组${word}（${data.rows} ${unit}）；点卡片看详情。`;
+      renderItems(data, kw);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    statusBox.classList.add('error');
+    statusBox.textContent = '出错了：' + err.message;
+    resultsBox.replaceChildren();
+  }
+}
+
+function go(keyword) {
+  syncUrl(keyword);
+  search(keyword);
+}
+
+function debounced() {
+  clearTimeout(timer);
+  timer = setTimeout(() => go(input.value.trim()), 260);
+}
+
+// 点空白处收起展开的选项
+document.addEventListener('click', () => {
+  if (openFacet) {
+    openFacet = '';
+    renderFacets();
+  }
+});
+
+input.addEventListener('input', debounced);
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  clearTimeout(timer);
+  go(input.value.trim());
+});
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    input.value = '';
+    clearTimeout(timer);
+    go('');
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !drawer.hidden) {
+    closeDrawer();
+    return;
+  }
+  if (e.key === '/' && document.activeElement !== input) {
+    e.preventDefault();
+    input.focus();
+  }
+});
+
+drawerBack.addEventListener('click', closeDrawer);
+
+const params = new URLSearchParams(location.search);
+const initialCat = params.get('cat');
+if (['plugin', 'framework', 'enemy', 'azban'].includes(initialCat)) cat = initialCat;
+for (const f of FACETS) {
+  const v = params.get(f.key);
+  if (v) filters[f.key] = v;
+}
+renderFacets();
+const initial = params.get('q') || '';
+input.value = initial;
+input.placeholder = CATS.find((c) => c.key === cat).ph;
+renderTabs();
+loadOverview();
+search(initial);
+</script>
+{% endblock %}

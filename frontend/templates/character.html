@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block title %}ArmsBank · 角色详情{% endblock %}
+
+{% block main %}
+  <p class="crumb"><a href="/" id="back">← 返回搜索</a></p>
+  <div id="detail"><p class="empty">读取中……</p></div>
+{% endblock %}
+
+{% block script %}
+<script>
+const CHARID = {{ charid|tojson }};
+const input = document.getElementById('q');
+const form = document.getElementById('searchForm');
+const countsBox = document.getElementById('counts');
+const detail = document.getElementById('detail');
+const back = document.getElementById('back');
+
+const keyword = new URLSearchParams(location.search).get('q') || '';
+input.value = keyword;
+if (keyword) back.href = '/?q=' + encodeURIComponent(keyword);
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = input.value.trim();
+  location.href = q ? '/?q=' + encodeURIComponent(q) : '/';
+});
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+/* ---------------- 数值计算：本体 + 兵装 + 职能 ---------------- */
+
+function modFor(job, key) {
+  if (!job) return null;
+  return job.mods.find((m) => m.stat === key && m.value != null && m.mode !== 'unused') || null;
+}
+
+function calc(stat, job) {
+  const base = stat.base == null ? 0 : stat.base;
+  const eq = stat.equip || 0;
+  const m = modFor(job, stat.key);
+  if (stat.apply === 'rate') return base + eq + (m ? Math.trunc(eq * m.value / 100) : 0);
+  if (stat.apply === 'flat') return base + eq + (m ? m.value : 0);
+  if (stat.apply === 'equip') return eq + (m ? m.value : 0);
+  return base;
+}
+
+function breakdown(stat, job) {
+  const base = stat.base == null ? 0 : stat.base;
+  const eq = stat.equip || 0;
+  const m = modFor(job, stat.key);
+  const bits = [];
+  if (stat.apply !== 'equip') bits.push('本体 ' + base);
+  if (eq) bits.push('兵装 ' + eq);
+  if (m) {
+    const sign = m.value >= 0 ? '+' : '';
+    if (stat.apply === 'rate') {
+      bits.push('职能 ' + sign + m.value + '%（' + sign + Math.trunc(eq * m.value / 100) + '）');
+    } else {
+      bits.push('职能 ' + sign + m.value + (m.kind === 'pct' ? '%' : ''));
+    }
+  }
+  return bits.join('  +  ');
+}
+
+/* ---------------- 职能明细 ---------------- */
+
+function formatMod(m) {
+  if (m.value == null) return '—';
+  const v = Number(m.value);
+  const pct = m.kind === 'pct' ? '%' : '';
+  if (v === 0) return '0' + pct;
+  return (v > 0 ? '+' : '') + v + pct;
+}
+
+function buildJobPanel(job) {
+  const frag = document.createDocumentFragment();
+  const h = el('h4', '', '职能 ' + job.name);
+  if (job.level != null) h.appendChild(el('span', '', '　等级 ' + job.level));
+  frag.appendChild(h);
+
+  const mods = el('div', 'mods');
+  for (const m of job.mods) {
+    const cls = (m.value == null || m.value === 0 || m.mode === 'unused')
+      ? 'zero' : (m.value > 0 ? 'plus' : 'minus');
+    const text = m.mode === 'unused' ? formatMod(m) + '（站点未使用）' : formatMod(m);
+    const node = el('span', 'mod ' + cls, m.label + ' ' + text);
+    if (m.mode === 'mul') node.title = '按兵装值乘算';
+    mods.appendChild(node);
+  }
+  frag.appendChild(mods);
+
+  if (job.skills && job.skills.length) {
+    frag.appendChild(el('div', 'jskills', '职能技能：' + job.skills.join(' / ')));
+  }
+  frag.appendChild(el('div', 'note',
+    '百分比项作用于兵装（站点公式），定值项直接相加；CP恢复率站点未参与计算。'));
+  return frag;
+}
+
+/* ---------------- 技能：名称常显，描述点击展开 ---------------- */
+
+function skillItem(s) {
+  const name = s.name || s.skillid || '（未命名）';
+  if (!s.description) {
+    const flat = el('div', 'skill flat');
+    flat.appendChild(el('span', 'sname', name));
+    appendSkillTags(flat, s);
+    return flat;
+  }
+  const box = document.createElement('details');
+  box.className = 'skill';
+  const sum = document.createElement('summary');
+  sum.appendChild(el('span', 'sname', name));
+  appendSkillTags(sum, s);
+  box.appendChild(sum);
+  box.appendChild(el('p', 'sdesc', s.description));
+  return box;
+}
+
+function appendSkillTags(host, s) {
+  if (s.ap) host.appendChild(el('span', 'stag', 'AP ' + s.ap));
+  if (s.cp) host.appendChild(el('span', 'stag', 'CP ' + s.cp));
+  if (s.damage) host.appendChild(el('span', 'stag', '伤害 ' + s.damage + '%'));
+}
+
+function skillBlock(title, list, note) {
+  const box = el('section', 'skillblock');
+  const h = el('h4', 'shead', title);
+  if (note) h.appendChild(el('span', 'snote', note));
+  box.appendChild(h);
+  if (!list || !list.length) {
+    box.appendChild(el('p', 'sempty', '—'));
+    return box;
+  }
+  for (const s of list) box.appendChild(skillItem(s));
+  return box;
+}
+
+/* ---------------- 渲染 ---------------- */
+
+let DATA = null;
+let currentArm = null;
+let currentJob = null;
+let portraitKind = 'normal';
+
+let vtabBox, armName, armTag, armSub, chips, applyNote, statsBox;
+let skillsJob, skillsOther, jobbox, portraitBtn, portraitImg, portraitCap;
+
+function portraitFile(arm, kind) {
+  const p = arm.portrait || {};
+  if (kind === 'battle') return p.battle || p.normal || '';
+  return p.normal || p.battle || '';
+}
+
+function paintPortrait() {
+  const file = portraitFile(currentArm, portraitKind);
+  if (!file) {
+    portraitBtn.classList.add('missing');
+    portraitImg.removeAttribute('src');
+    portraitImg.hidden = true;
+    portraitCap.textContent = '没有立绘';
+    portraitBtn.disabled = true;
+    return;
+  }
+  portraitBtn.disabled = false;
+  portraitBtn.classList.remove('missing');
+  portraitImg.hidden = false;
+  portraitImg.src = '/img/' + encodeURIComponent(file);
+  portraitImg.alt = (currentArm.name || '') + (portraitKind === 'battle' ? ' 战斗立绘' : ' 立绘');
+  const other = portraitKind === 'normal' ? 'Battle' : 'Normal';
+  portraitCap.textContent = (portraitKind === 'normal' ? 'Normal' : 'Battle') + '　点击看 ' + other;
+}
+
+function paintStats() {
+  statsBox.replaceChildren();
+  for (const s of currentArm.stats) {
+    const v = calc(s, currentJob);
+    const cell = el('div', 'stat');
+    cell.appendChild(el('span', 'k', s.label));
+    const val = el('span', 'v' + (v === 0 ? ' zero' : ''), String(v) + (s.unit || ''));
+    val.title = breakdown(s, currentJob);
+    cell.appendChild(val);
+    statsBox.appendChild(cell);
+  }
+}
+
+function paintJobSkills() {
+  const all = (currentArm.skills && currentArm.skills.job) || {};
+  const list = (currentJob && all[String(currentJob.jobid)]) || [];
+  skillsJob.replaceChildren(
+    skillBlock('职能技能', list, currentJob ? '· ' + currentJob.name : '')
+  );
+}
+
+function selectJob(job, openBox) {
+  currentJob = job;
+  jobbox.replaceChildren(buildJobPanel(job));
+  jobbox.hidden = !openBox;
+  applyNote.textContent = '当前职能：' + job.name
+    + '　（数值已按该职能计算，点标签切换；悬停数值可看本体/兵装/职能拆分）';
+  applyNote.hidden = false;
+  for (const c of chips.children) {
+    c.classList.toggle('active', String(c.dataset.jobid) === String(job.jobid));
+  }
+  paintStats();
+  paintJobSkills();
+}
+
+function paintArm() {
+  const arm = currentArm;
+  armName.textContent = arm.name || arm.armsid;
+  armTag.textContent = arm.variant || '';
+  armTag.hidden = !arm.variant;
+  armSub.textContent = [arm.number, arm.arms_type, arm.size].filter(Boolean).join(' · ');
+
+  for (const t of vtabBox.children) {
+    t.classList.toggle('active', t.dataset.armid === arm.armsid);
+  }
+
+  chips.replaceChildren();
+  for (const jid of arm.job_ids) {
+    const job = DATA.jobs[jid];
+    if (!job) continue;
+    const chip = el('button', 'chip', job.name);
+    chip.type = 'button';
+    chip.dataset.jobid = jid;
+    chip.addEventListener('click', () => {
+      const same = currentJob && String(currentJob.jobid) === String(job.jobid);
+      selectJob(job, same ? jobbox.hidden : true);
+    });
+    chips.appendChild(chip);
+  }
+
+  skillsOther.replaceChildren(
+    skillBlock('技能', (arm.skills && arm.skills.other) || [], '· 专属 / DOLLS / 改造，合并展示')
+  );
+
+  portraitKind = 'normal';
+  paintPortrait();
+
+  const first = arm.job_ids.map((id) => DATA.jobs[id]).find(Boolean);
+  if (first) {
+    selectJob(first, false);
+  } else {
+    applyNote.hidden = true;
+    currentJob = null;
+    jobbox.hidden = true;
+    paintStats();
+    paintJobSkills();
+  }
+}
+
+function selectArm(arm) {
+  currentArm = arm;
+  paintArm();
+}
+
+function render(data) {
+  DATA = data;
+  detail.replaceChildren();
+
+  if (data.equip_ready === false) {
+    detail.appendChild(el('p', 'banner',
+      '兵装表 arms_equip 还没建：现在只能显示本体值（职能的 5 个百分比因此是 0 效果）。'
+      + '跑一次 setup_arms_equip.sql 后刷新即可。'));
+  }
+
+  const box = el('header', 'chead');
+  const h1 = document.createElement('h1');
+  h1.appendChild(el('span', 'stars', '★'.repeat(data.rarity || 0)));
+  h1.appendChild(el('span', '', data.name || data.charid));
+  box.appendChild(h1);
+
+  const meta = [data.affiliation, data.college, data.number,
+    (data.arms_count != null ? data.arms_count : data.arms.length) + ' 机体'].filter(Boolean);
+  box.appendChild(el('div', 'meta', meta.join(' · ')));
+  if (data.description) box.appendChild(el('p', 'desc', data.description));
+  detail.appendChild(box);
+
+  if (!data.arms.length) {
+    detail.appendChild(el('p', 'empty', '这个角色在库里没有机体记录。'));
+    return;
+  }
+
+  // 变体切换（原型 / 改型 / 特改型）
+  vtabBox = el('div', 'vtabs');
+  if (data.arms.length > 1) {
+    for (const arm of data.arms) {
+      const t = el('button', 'vtab', arm.variant || arm.name || arm.armsid);
+      t.type = 'button';
+      t.dataset.armid = arm.armsid;
+      t.title = arm.name || arm.armsid;
+      t.addEventListener('click', () => selectArm(arm));
+      vtabBox.appendChild(t);
+    }
+    detail.appendChild(vtabBox);
+  } else {
+    vtabBox.hidden = true;
+    detail.appendChild(vtabBox);
+  }
+
+  const body = el('div', 'armbody');
+
+  portraitBtn = el('button', 'portrait');
+  portraitBtn.type = 'button';
+  portraitBtn.title = '点击切换 Normal / Battle';
+  portraitImg = document.createElement('img');
+  portraitImg.decoding = 'async';
+  portraitCap = el('span', 'pcap', '');
+  portraitBtn.append(portraitImg, portraitCap);
+  portraitBtn.addEventListener('click', () => {
+    portraitKind = portraitKind === 'normal' ? 'battle' : 'normal';
+    paintPortrait();
+  });
+
+  const main = el('div', 'arm-main');
+  const head = el('div', 'arm-head');
+  armName = el('span', 'aname', '');
+  armTag = el('span', 'tag', '');
+  armSub = el('span', 'arm-sub', '');
+  head.append(armName, armTag, armSub);
+  chips = el('div', 'chips');
+  head.appendChild(chips);
+
+  applyNote = el('div', 'applynote');
+  statsBox = el('div', 'stats');
+  skillsJob = el('div', 'skillslot');
+  skillsOther = el('div', 'skillslot');
+  jobbox = el('div', 'jobbox');
+  jobbox.hidden = true;
+
+  main.append(head, applyNote, statsBox, skillsJob, skillsOther, jobbox);
+  body.append(portraitBtn, main);
+  detail.appendChild(body);
+
+  const start = data.arms.find((a) => a.armsid === data.default_armsid) || data.arms[0];
+  selectArm(start);
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/character/' + encodeURIComponent(CHARID));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '读取失败');
+    countsBox.textContent = '';
+    render(data);
+  } catch (err) {
+    detail.replaceChildren(el('p', 'empty', '出错了：' + err.message));
+  }
+}
+
+load();
+</script>
+{% endblock %}

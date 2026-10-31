@@ -17,7 +17,6 @@ const input = document.getElementById('q');
 const form = document.getElementById('searchForm');
 const statusBox = document.getElementById('status');
 const resultsBox = document.getElementById('results');
-const countsBox = document.getElementById('counts');
 const tabsBox = document.getElementById('tabs');
 const facetsBox = document.getElementById('facets');
 const drawer = document.getElementById('drawer');
@@ -37,11 +36,11 @@ function typeDot(type) {
 }
 
 const CATS = [
-  { key: 'character', label: '角色', countKey: 'characters', ph: '搜索 角色名 / 机体名 / 专属·DOLLS·改造技能名' },
-  { key: 'plugin', label: '性格插件', countKey: 'plugins', ph: '搜索 性格插件名称' },
-  { key: 'framework', label: '知性框架', countKey: 'frameworks', ph: '搜索 知性框架名称' },
-  { key: 'enemy', label: '敌人', countKey: 'enemies', ph: '搜索 敌人名称' },
-  { key: 'azban', label: '阿兹班石', countKey: 'azbans', ph: '搜索 阿兹班石名称' },
+  { key: 'character', label: '角色', countKey: 'characters' },
+  { key: 'plugin', label: '性格插件', countKey: 'plugins' },
+  { key: 'framework', label: '知性框架', countKey: 'frameworks' },
+  { key: 'enemy', label: '敌人', countKey: 'enemies' },
+  { key: 'azban', label: '阿兹班石', countKey: 'azbans' },
 ];
 
 let cat = 'character';
@@ -126,8 +125,6 @@ function switchCat(key) {
   cat = key;
   closeDrawer();
   renderTabs();
-  const c = CATS.find((x) => x.key === cat);
-  input.placeholder = c.ph;
   openFacet = '';
   renderFacets();
   go(input.value.trim());
@@ -137,13 +134,8 @@ async function loadOverview() {
   try {
     const res = await fetch('/api/overview');
     overview = await res.json();
-    countsBox.textContent = `${overview.characters} 角色 · ${overview.arms} 机体`
-      + (overview.plugins != null ? ` · ${overview.plugins} 插件` : '')
-      + (overview.frameworks != null ? ` · ${overview.frameworks} 框架` : '')
-      + (overview.enemies != null ? ` · ${overview.enemies} 敌人` : '')
-      + (overview.azbans != null ? ` · ${overview.azbans} 阿兹班石` : '');
   } catch (err) {
-    countsBox.textContent = '';
+    overview = null;
   }
   renderTabs();
 }
@@ -165,7 +157,7 @@ function syncUrl(keyword) {
 
 function buildRow(ch, keyword) {
   const a = document.createElement('a');
-  a.className = 'card' + (ch.name_matched ? ' namehit' : '');
+  a.className = 'card' + (ch.name_matched ? ' namehit' : '') + (ch.rarity ? ' r' + ch.rarity : '');
   a.href = '/c/' + encodeURIComponent(ch.charid)
     + (keyword ? '?q=' + encodeURIComponent(keyword) : '');
 
@@ -207,6 +199,14 @@ function buildRow(ch, keyword) {
 function buildItemCard(group) {
   const card = el('button', 'item-card');
   card.type = 'button';
+  if (cat === 'plugin') {
+    const t0 = group.slot_type != null ? group.slot_type
+      : (group.tiers && group.tiers[0] ? group.tiers[0].slot_type : null);
+    if (TYPE_COLORS[t0]) {
+      card.classList.add('typed');
+      card.style.setProperty('--tc', TYPE_COLORS[t0]);
+    }
+  }
 
   const line = el('div', 'card-line');
   // 阿兹班石没有稀有度（rarity 恒为 0），别留一个空星标占位
@@ -273,6 +273,8 @@ function openDrawer(group) {
 }
 
 function paintDrawer(group, index) {
+  drawer.classList.remove('typed');
+  drawer.style.removeProperty('--tc');
   if (cat === 'enemy') {
     paintEnemyDrawer(group, index);
     return;
@@ -283,6 +285,12 @@ function paintDrawer(group, index) {
   }
   const tier = group.tiers[index];
   drawer.replaceChildren();
+  drawer.classList.remove('typed');
+  drawer.style.removeProperty('--tc');
+  if (cat === 'plugin' && TYPE_COLORS[tier.slot_type]) {
+    drawer.classList.add('typed');
+    drawer.style.setProperty('--tc', TYPE_COLORS[tier.slot_type]);
+  }
 
   const head = el('div', 'dhead');
   const closeBtn = el('button', 'dclose', '✕');
@@ -293,6 +301,7 @@ function paintDrawer(group, index) {
   const title = el('div', 'dtitle');
   title.appendChild(el('span', 'stars', stars(tier.rarity)));
   title.appendChild(el('span', 'cname', group.name));
+  if (cat === 'plugin') title.appendChild(el('span', 'pplus', '等级+' + tier.level));
   head.appendChild(title);
   drawer.appendChild(head);
 
@@ -344,8 +353,6 @@ function paintDrawer(group, index) {
       slotBox.appendChild(cell);
     });
     body.appendChild(slotBox);
-    body.appendChild(el('p', 'dhint',
-      '数字是该格能装的插件类型——插件卡片上标的那个数；「任」是哪个类型都能插。'));
 
     body.appendChild(el('h4', 'dsub', `升级条件（这个框架最高 ${tier.max_level} 级）`));
     const stages = el('div', 'stages');
@@ -366,8 +373,6 @@ function paintDrawer(group, index) {
       stages.appendChild(row);
     }
     if (tier.stages.length) body.appendChild(stages);
-    body.appendChild(el('p', 'dhint',
-      '插上去的同类型插件，把各自的等级加起来达到某一行的要求，框架就升到那一级；等级越高，附带被动的那一档越强。这里的「级」是框架的强化等级，和名字里的 Ⅳ 不是一回事（那是框架本身的档位）。'));
 
     body.appendChild(el('h4', 'dsub', '附带被动'));
     if (tier.passive) {
@@ -377,14 +382,6 @@ function paintDrawer(group, index) {
       .split('\n').map((s) => s.trim())
       .filter((line) => line && line !== tier.passive);
     for (const line of lines) body.appendChild(el('p', 'dtext', line));
-    body.appendChild(el('p', 'dmeta',
-      `等级 ${tier.skill_level} · 需求角色等级 ${tier.char_level_req} · 物品ID ${tier.itemid}`));
-  }
-
-  if (cat === 'plugin') {
-    body.appendChild(el('p', 'dmeta',
-      `类型 ${tier.slot_type}（${TYPE_NAMES[tier.slot_type] || '?'}） · 等级 +${tier.level} · `
-      + `稀有度 ${tier.rarity} · 物品ID ${tier.itemid}`));
   }
 
   drawer.appendChild(body);
@@ -552,10 +549,6 @@ function paintAzbanDrawer(group, index) {
   }
 
   if (v.description) body.appendChild(el('p', 'dtext', v.description));
-  body.appendChild(el('p', 'dmeta',
-    (group.exclusive ? '专属 · ' : `${group.body || '—'} · ${group.class_name || '—'} · `)
-    + `返还 ${v.rebate}% · 物品ID ${v.itemid}`));
-
   drawer.appendChild(body);
   drawer.scrollTop = 0;
 }
@@ -721,10 +714,9 @@ async function search(keyword) {
       const word = cat === 'plugin' ? '性格插件'
         : cat === 'enemy' ? '敌人'
         : cat === 'azban' ? '阿兹班石' : '知性框架';
-      const unit = cat === 'enemy' ? '个型号' : '条档位';
       statusBox.textContent = kw
-        ? `「${kw}」匹配 ${data.count} 组${word}（${data.rows} ${unit}）；点卡片看详情。`
-        : `共 ${data.count} 组${word}（${data.rows} ${unit}）；点卡片看详情。`;
+        ? `「${kw}」匹配 ${data.count} 组${word}`
+        : `共 ${data.count} 组${word}`;
       renderItems(data, kw);
     }
   } catch (err) {
@@ -790,7 +782,6 @@ for (const f of FACETS) {
 renderFacets();
 const initial = params.get('q') || '';
 input.value = initial;
-input.placeholder = CATS.find((c) => c.key === cat).ph;
 renderTabs();
 loadOverview();
 search(initial);

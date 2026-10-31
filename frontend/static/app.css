@@ -782,3 +782,389 @@ body.drawer-open { overflow: hidden; }
   font-weight: 650;
   color: #2b5c3d;
 }
+
+/* =====================================================================
+   视觉优化层（覆盖前面的同名规则，放在文件最末尾）
+   ===================================================================== */
+:root {
+  --shadow-sm: 0 1px 2px rgba(20, 30, 50, .05), 0 1px 3px rgba(20, 30, 50, .04);
+  --shadow-md: 0 8px 22px rgba(20, 30, 50, .10);
+  --radius: 12px;
+}
+
+body {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #e8effb 0, #f3f5f9 300px) no-repeat, #f3f5f9;
+}
+
+/* —— 顶栏：品牌渐变 + 圆角搜索框（自带放大镜，因为不再有占位文字） —— */
+.topbar { padding: 11px 24px; box-shadow: 0 1px 0 rgba(20, 30, 50, .04), 0 4px 14px rgba(20, 30, 50, .04); }
+.brand {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  background: linear-gradient(90deg, #1f4fa3, #2f8be0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.search input {
+  padding: 9px 14px 9px 38px;
+  border-radius: 999px;
+  background: #f6f8fb url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa4b2' stroke-width='2.2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-3.5-3.5'/></svg>") no-repeat 13px center / 16px;
+  border-color: transparent;
+  transition: background-color .15s, box-shadow .15s, border-color .15s;
+}
+.search input:focus { background-color: #fff; border-color: var(--accent); }
+.search button { padding: 9px 20px; border-radius: 999px; font-weight: 600; box-shadow: 0 2px 8px rgba(43, 108, 176, .25); }
+
+.wrap { padding-top: 22px; }
+.status { font-size: 12.5px; letter-spacing: .02em; }
+
+/* —— 分区 tab —— */
+.tabs { gap: 10px; border-bottom: 0; padding-bottom: 4px; margin-bottom: 12px; }
+.tab { padding: 8px 16px; font-weight: 600; box-shadow: var(--shadow-sm); }
+.tab:hover { transform: translateY(-1px); }
+.tab.active { box-shadow: 0 4px 12px rgba(43, 108, 176, .32); }
+
+/* —— 角色卡：左侧按稀有度上色 —— */
+.card {
+  --rc: #dfe3ea;
+  padding: 13px 16px;
+  border-left: 4px solid var(--rc);
+  box-shadow: var(--shadow-sm);
+}
+.card.r5 { --rc: #e0a800; }
+.card.r4 { --rc: #9b6bd3; }
+.card.r3 { --rc: #4a90d9; }
+.card.namehit { border-left: 4px solid var(--rc); background: linear-gradient(90deg, #f1f6ff, #fff 55%); }
+.card:hover {
+  border-color: #b9cdf0;
+  border-left-color: var(--rc);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.cname { font-weight: 700; letter-spacing: .01em; }
+.stars { font-size: 13px; }
+.pill { font-weight: 500; }
+.arms-line { margin-top: 7px; }
+
+/* —— 插件 / 框架 / 敌人 / 阿兹班石 卡片 —— */
+.item-card { padding: 12px 15px; box-shadow: var(--shadow-sm); }
+.item-card:hover { border-color: #9fb0c6; box-shadow: var(--shadow-md); }
+.item-card .item-sub { margin-top: 6px; }
+
+/* 性格插件：整张卡按类型着色（红 / 黄 / 蓝 / 绿 / 紫） */
+.item-card.typed {
+  border-left: 4px solid var(--tc);
+  border-color: color-mix(in srgb, var(--tc) 38%, #e3e6ec);
+  border-left-color: var(--tc);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--tc) 17%, #fff) 0, #fff 78%);
+}
+.item-card.typed:hover {
+  border-color: color-mix(in srgb, var(--tc) 70%, #fff);
+  border-left-color: var(--tc);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--tc) 28%, transparent);
+}
+.item-card.typed .pplus,
+.drawer.typed .pplus {
+  color: color-mix(in srgb, var(--tc) 55%, #1c2028);
+  background: color-mix(in srgb, var(--tc) 24%, #fff);
+}
+
+/* —— 抽屉 —— */
+.drawer { width: 440px; }
+.dhead { padding: 16px 18px 12px; }
+.dtitle .cname { font-size: 18px; }
+.dbody { padding: 14px 18px 28px; }
+.dsub { display: flex; align-items: center; gap: 7px; }
+.dsub::before { content: ''; width: 3px; height: 12px; border-radius: 2px; background: var(--accent); opacity: .65; }
+.statline { padding: 6px 12px; }
+.slot { box-shadow: var(--shadow-sm); }
+
+/* 性格插件抽屉：顶部色条 + 渐变底色 + 属性行同色系 */
+.drawer.typed .dhead {
+  border-top: 5px solid var(--tc);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 20%, #fff), #fff);
+}
+.drawer.typed .dsub::before { background: var(--tc); opacity: 1; }
+.drawer.typed .statline {
+  background: color-mix(in srgb, var(--tc) 9%, #fff);
+  border-color: color-mix(in srgb, var(--tc) 28%, #fff);
+}
+.drawer.typed .statline .sv { color: color-mix(in srgb, var(--tc) 55%, #1c2028); }
+.drawer.typed .dtext {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--tc) 7%, #fff);
+  border-left: 3px solid var(--tc);
+  border-radius: 6px;
+}
+
+/* —— 角色详情页 —— */
+.chead {
+  padding: 18px 22px;
+  border-top: 4px solid var(--accent);
+  background: linear-gradient(135deg, #fff 55%, #eef4ff);
+  box-shadow: var(--shadow-sm);
+}
+.chead h1 { font-size: 26px; }
+.chead .meta { margin-top: 4px; font-size: 13px; }
+
+.vtab, .chip { transition: all .15s; }
+.vtab.active, .chip.active { box-shadow: 0 3px 10px rgba(43, 108, 176, .30); }
+
+.armbody { gap: 20px; }
+.portrait {
+  box-shadow: var(--shadow-sm);
+  border-radius: 14px;
+}
+.portrait img { background: radial-gradient(circle at 50% 35%, #fff, #eef1f6); }
+.portrait:hover { box-shadow: var(--shadow-md); }
+
+.arm-main { padding: 18px 20px; gap: 14px; box-shadow: var(--shadow-sm); }
+.aname { font-size: 19px; font-weight: 750; }
+.stats { gap: 1px; border-radius: 10px; }
+.stat { padding: 9px 11px; transition: background .12s; }
+.stat:hover { background: #f4f8ff; }
+.stat .k { font-size: 11.5px; letter-spacing: .03em; }
+.stat .v { font-size: 18px; font-weight: 700; color: #1c2a44; }
+
+.skillblock { background: #fff; box-shadow: var(--shadow-sm); }
+.skillblock .shead::before {
+  content: '';
+  align-self: center;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.skill > summary { padding: 7px 4px; border-radius: 6px; }
+.skill > summary:hover { background: #f4f8ff; }
+
+.jobbox { background: #fff; }
+
+/* 平滑一点的滚动条 */
+.drawer, .facet-menu { scrollbar-width: thin; }
+
+/* =====================================================================
+   背景图：随机一张（由 base.html 里的脚本设置 --bg-img / --bg-opacity）
+   模糊 + 半透明，固定在视口，不随页面滚动
+   ===================================================================== */
+:root { --bg-opacity: .55; --bg-blur: 1.5px; }
+
+body { background: transparent; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: -8px;                  /* 比视口大一圈，避免模糊后边缘发白 */
+  z-index: -1;
+  pointer-events: none;
+  background: var(--bg-img, none) center / cover no-repeat;
+  filter: blur(var(--bg-blur));
+  opacity: 0;
+  transition: opacity .8s ease-out;
+}
+.bg-ready body::before { opacity: var(--bg-opacity); }
+
+/* 卡片半透明 + 轻微磨砂，图片隐约透出 */
+.topbar { background: rgba(255, 255, 255, .78); }
+.card, .item-card, .chead, .arm-main, .skillblock, .jobbox, .portrait {
+  background-color: rgba(255, 255, 255, .78);
+}
+.card, .item-card, .chead, .arm-main { backdrop-filter: blur(1.5px); }
+
+/* —— 立绘框：按学联铺背景（图片由 character.html 内联设置） —— */
+/* 背景作为独立图层：调淡 + 轻微模糊 + 中间提亮，只衬托立绘，不抢戏 */
+.portrait.nbg { position: relative; isolation: isolate; }
+.portrait.nbg::before {
+  content: '';
+  position: absolute;
+  inset: -6px;                         /* 模糊后边缘不发白 */
+  z-index: -2;
+  background: var(--nbg) center / cover no-repeat;
+  opacity: .50;                        /* 想更淡/更明显就改这里 */
+  filter: blur(2px) saturate(.85);
+}
+.portrait.nbg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse at 50% 45%, rgba(255, 255, 255, .55), rgba(255, 255, 255, .15) 75%);
+}
+.portrait.nbg img { background: none; }
+
+/* =====================================================================
+   黑夜模式（html[data-theme="dark"]）+ 切换按钮
+   ===================================================================== */
+.theme-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  color: #59627a;
+  background: rgba(255, 255, 255, .8);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all .15s;
+}
+.theme-btn::before { content: '☾'; }
+.theme-btn:hover { color: var(--accent); border-color: #9fb0c6; transform: rotate(-12deg); }
+html[data-theme="dark"] .theme-btn::before { content: '☀'; }
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #12151b;
+  --card: #1b212b;
+  --line: #2c3441;
+  --text: #e7eaf0;
+  --muted: #939cad;
+  --accent: #4f90ea;
+  --accent-soft: rgba(79, 144, 234, .18);
+  --warn: #e0a24a;
+  --surf: #232b38;
+  --surf2: #2c3646;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .45);
+  --shadow-md: 0 8px 22px rgba(0, 0, 0, .55);
+  --bg-opacity: .5;
+}
+html[data-theme="dark"] body { background: transparent; }
+html[data-theme="dark"] a { color: #7db4ff; }
+
+/* 顶栏 */
+html[data-theme="dark"] .topbar { background: rgba(22, 27, 36, .84); box-shadow: 0 1px 0 rgba(0, 0, 0, .4); }
+html[data-theme="dark"] .brand { background: linear-gradient(90deg, #8fc0ff, #4aa8ff); -webkit-background-clip: text; background-clip: text; }
+html[data-theme="dark"] .search input { background-color: var(--surf); color: var(--text); }
+html[data-theme="dark"] .search input:focus { background-color: var(--card); }
+html[data-theme="dark"] .theme-btn { color: #c4cad6; background: rgba(35, 43, 56, .85); }
+html[data-theme="dark"] .status.error { color: #ff8a80; }
+
+/* 卡片类容器 */
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .item-card,
+html[data-theme="dark"] .arm-main,
+html[data-theme="dark"] .skillblock,
+html[data-theme="dark"] .jobbox,
+html[data-theme="dark"] .portrait { background-color: rgba(27, 33, 43, .82); }
+html[data-theme="dark"] .card.namehit { background: linear-gradient(90deg, rgba(79, 144, 234, .18), rgba(27, 33, 43, .82) 55%); }
+html[data-theme="dark"] .chead { background: linear-gradient(135deg, rgba(27, 33, 43, .88) 55%, rgba(50, 90, 160, .30)); }
+html[data-theme="dark"] .card:hover { border-color: #3d5a8a; border-left-color: var(--rc); }
+html[data-theme="dark"] .item-card:hover { border-color: #46526a; }
+html[data-theme="dark"] .portrait:hover { border-color: #46526a; }
+
+/* 文字颜色（原来写死的深灰 → 浅灰） */
+html[data-theme="dark"] .arms-line,
+html[data-theme="dark"] .chead .desc,
+html[data-theme="dark"] .jskills,
+html[data-theme="dark"] .skills,
+html[data-theme="dark"] .skill .sdesc,
+html[data-theme="dark"] .dtext,
+html[data-theme="dark"] .eskill-desc,
+html[data-theme="dark"] .stage-req,
+html[data-theme="dark"] .az-new,
+html[data-theme="dark"] .tab,
+html[data-theme="dark"] .chip,
+html[data-theme="dark"] .vtab,
+html[data-theme="dark"] .tierbtn,
+html[data-theme="dark"] .facet-btn,
+html[data-theme="dark"] .fchip { color: #c4cad6; }
+html[data-theme="dark"] .stat .v { color: #e7eaf0; }
+html[data-theme="dark"] .stat .v.zero { color: #5d6677; }
+html[data-theme="dark"] .mod.zero { color: #667085; }
+html[data-theme="dark"] .arms-line .hit { color: #7db4ff; }
+html[data-theme="dark"] .skill-hit { color: #7db4ff; background: rgba(79, 144, 234, .16); }
+
+/* 标签 / 小按钮 */
+html[data-theme="dark"] .pill,
+html[data-theme="dark"] .tag,
+html[data-theme="dark"] .tab-count,
+html[data-theme="dark"] .skill .stag,
+html[data-theme="dark"] .pplus { color: #c4cad6; background: var(--surf2); }
+html[data-theme="dark"] .tab.active .tab-count { color: #fff; background: rgba(255, 255, 255, .24); }
+html[data-theme="dark"] .pill.boss { color: #ff8f86; background: rgba(240, 90, 80, .16); }
+html[data-theme="dark"] .tab,
+html[data-theme="dark"] .vtab,
+html[data-theme="dark"] .chip,
+html[data-theme="dark"] .tierbtn,
+html[data-theme="dark"] .facet-btn { background: var(--card); border-color: var(--line); }
+html[data-theme="dark"] .tab:hover,
+html[data-theme="dark"] .tierbtn:hover,
+html[data-theme="dark"] .facet-btn:hover { border-color: #4a5870; }
+html[data-theme="dark"] .vtab:hover,
+html[data-theme="dark"] .chip:hover { background: var(--accent-soft); }
+html[data-theme="dark"] .tab.active,
+html[data-theme="dark"] .vtab.active,
+html[data-theme="dark"] .chip.active,
+html[data-theme="dark"] .tierbtn.active,
+html[data-theme="dark"] .facet-btn.on,
+html[data-theme="dark"] .fchip.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* 面板数值 / 职能 */
+html[data-theme="dark"] .stat { background: #1f2631; }
+html[data-theme="dark"] .stat:hover { background: #263041; }
+html[data-theme="dark"] .mod { background: var(--surf); border-color: var(--line); }
+html[data-theme="dark"] .mod.plus { color: #7fdc9c; background: rgba(60, 170, 100, .16); border-color: rgba(60, 170, 100, .35); }
+html[data-theme="dark"] .mod.minus { color: #ff9a90; background: rgba(240, 90, 80, .14); border-color: rgba(240, 90, 80, .35); }
+html[data-theme="dark"] .skill { border-top-color: var(--line); }
+html[data-theme="dark"] .skill > summary:hover { background: var(--accent-soft); }
+html[data-theme="dark"] .banner { color: #f0c27a; background: rgba(224, 162, 74, .12); border-color: rgba(224, 162, 74, .4); border-left-color: #e0a24a; }
+
+/* 立绘框 */
+html[data-theme="dark"] .portrait img { background: radial-gradient(circle at 50% 35%, #2a3342, #1a1f29); }
+html[data-theme="dark"] .portrait.nbg img { background: none; }
+html[data-theme="dark"] .portrait.nbg::before { opacity: .42; }
+html[data-theme="dark"] .portrait.nbg::after {
+  background: radial-gradient(ellipse at 50% 45%, rgba(14, 17, 23, .50), rgba(14, 17, 23, .12) 75%);
+}
+
+/* 抽屉里的各种底色块 */
+html[data-theme="dark"] .dclose:hover { background: var(--surf); }
+html[data-theme="dark"] .statline,
+html[data-theme="dark"] .slot,
+html[data-theme="dark"] .stage,
+html[data-theme="dark"] .estat,
+html[data-theme="dark"] .eskill,
+html[data-theme="dark"] .azpair { background: var(--surf); border-color: var(--line); }
+html[data-theme="dark"] .slot.free { background: transparent; }
+html[data-theme="dark"] .statline .sv { color: #6fd6a0; }
+html[data-theme="dark"] .azadd { color: #8fdcb0; background: rgba(80, 170, 120, .14); }
+html[data-theme="dark"] .epic { background: var(--surf); border-color: var(--line); }
+html[data-theme="dark"] .evariants { color: var(--text); background: var(--surf); border-color: var(--line); }
+html[data-theme="dark"] .az-old { color: var(--muted); }
+
+/* 角色库筛选 */
+html[data-theme="dark"] .facet-menu { background: var(--card); border-color: var(--line); box-shadow: 0 12px 26px rgba(0, 0, 0, .6); }
+html[data-theme="dark"] .fchip { background: var(--surf); border-color: var(--line); }
+html[data-theme="dark"] .fchip:hover { background: var(--surf2); }
+html[data-theme="dark"] .facet-clear { color: #f08a8a; background: var(--card); border-color: #5a3a3a; }
+html[data-theme="dark"] .facet-clear:hover { background: #2a2024; }
+
+/* 性格插件：类型色在深色底上重新调配 */
+html[data-theme="dark"] .item-card.typed {
+  border-color: color-mix(in srgb, var(--tc) 42%, #2c3441);
+  border-left-color: var(--tc);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--tc) 24%, #1b212b) 0, #1b212b 80%);
+}
+html[data-theme="dark"] .item-card.typed:hover {
+  border-color: color-mix(in srgb, var(--tc) 75%, #1b212b);
+  border-left-color: var(--tc);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--tc) 30%, transparent);
+}
+html[data-theme="dark"] .item-card.typed .pplus,
+html[data-theme="dark"] .drawer.typed .pplus {
+  color: color-mix(in srgb, var(--tc) 45%, #fff);
+  background: color-mix(in srgb, var(--tc) 30%, #1b212b);
+}
+html[data-theme="dark"] .drawer.typed .dhead {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 28%, #1b212b), #1b212b);
+}
+html[data-theme="dark"] .drawer.typed .statline {
+  background: color-mix(in srgb, var(--tc) 13%, #1b212b);
+  border-color: color-mix(in srgb, var(--tc) 32%, #1b212b);
+}
+html[data-theme="dark"] .drawer.typed .statline .sv { color: color-mix(in srgb, var(--tc) 50%, #fff); }
+html[data-theme="dark"] .drawer.typed .dtext { background: color-mix(in srgb, var(--tc) 11%, #1b212b); }

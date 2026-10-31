@@ -5,16 +5,59 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ArmsBank{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script>
+  // 主题（白天 / 黑夜）+ 随机背景图。放在 <head> 里先执行，避免页面先白后黑地闪一下。
+  (function () {
+    var KEY = 'armsbank-theme';
+    var root = document.documentElement;
+    var base = {{ url_for('static', filename='bg/')|tojson }};
+    var POOLS = {
+      light: ['BG_Light_0', 'BG_Light_1', 'BG_Light_2', 'BG_Light_3', 'BG_Light_4', 'bg_light_站点本地_'],
+      dark:  ['BG_Dark_0', 'BG_Dark_1', 'BG_Dark_2', 'BG_Dark_3', 'bg_dark_站点本地_']
+    };
+
+    var saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) {}
+    var theme = saved === 'dark' || saved === 'light' ? saved
+      : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', theme);
+
+    // 从当前主题对应的图里随机挑一张；加载失败（缺文件 / 文件名不对）就换一张
+    function pickBg() {
+      var pool = POOLS[theme].slice();
+      (function next() {
+        if (!pool.length) return;
+        var i = Math.floor(Math.random() * pool.length);
+        var name = pool[i];
+        var img = new Image();
+        img.onload = function () {
+          root.style.setProperty('--bg-img', 'url("' + base + encodeURIComponent(name) + '.webp")');
+          root.classList.add('bg-ready');
+        };
+        img.onerror = function () { pool.splice(i, 1); next(); };
+        img.src = base + encodeURIComponent(name) + '.webp';
+      })();
+    }
+    pickBg();
+
+    window.toggleTheme = function () {
+      theme = theme === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', theme);
+      try { localStorage.setItem(KEY, theme); } catch (e) {}
+      pickBg();
+    };
+  })();
+  </script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/">ArmsBank</a>
     <form class="search" id="searchForm" role="search" autocomplete="off">
-      <input id="q" type="search" placeholder="角色名 / 机体名 / 编号（空格分隔多个关键词）"
-             spellcheck="false" autocomplete="off">
+      <input id="q" type="search" spellcheck="false" autocomplete="off">
       <button type="submit">搜索</button>
     </form>
-    <span class="counts" id="counts"></span>
+    <button class="theme-btn" id="themeBtn" type="button" onclick="toggleTheme()"
+            title="切换白天 / 黑夜模式" aria-label="切换白天 / 黑夜模式"></button>
   </header>
 
   <main class="wrap">

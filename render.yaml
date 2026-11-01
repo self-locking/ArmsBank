@@ -1,0 +1,38 @@
+﻿services:
+  - type: web
+    name: armsbank
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:application --workers 2 --timeout 120
+    healthCheckPath: /api/overview
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ARMSBANK_DB_HOST
+        fromDatabase:
+          name: armsbank-db
+          property: host
+      - key: ARMSBANK_DB_PORT
+        fromDatabase:
+          name: armsbank-db
+          property: port
+      - key: ARMSBANK_DB_NAME
+        fromDatabase:
+          name: armsbank-db
+          property: database
+      - key: ARMSBANK_DB_USER
+        fromDatabase:
+          name: armsbank-db
+          property: user
+      - key: ARMSBANK_DB_PASSWORD
+        fromDatabase:
+          name: armsbank-db
+          property: password
+
+databases:
+  - name: armsbank-db
+    plan: free
+    databaseName: armsbank_db
+    user: armsbank

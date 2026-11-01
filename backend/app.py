@@ -1052,6 +1052,59 @@ def serialize_stats(row) -> list[dict]:
     ]
 
 
+# 角色列表允许排序的七项属性
+SORT_STAT_KEYS = (
+    "hp",
+    "armor",
+    "mobility",
+    "ground_fire",
+    "air_fire",
+    "hit",
+    "penetration",
+)
+
+
+def calculate_sort_stats(row, job):
+    """
+    计算一台机体在指定默认职能下的最终面板。
+    计算规则与 character.html 中的 calc() 保持一致。
+    """
+    result = {}
+    mods = job["mods"] if job else []
+
+    for key, _, _, apply, _ in STAT_FIELDS:
+        if key not in SORT_STAT_KEYS:
+            continue
+
+        base = num(row.get(key)) or 0
+        equip = num0(row.get(f"eq_{key}"))
+
+        mod = next(
+            (
+                m for m in mods
+                if m["stat"] == key
+                and m["value"] is not None
+                and m["mode"] != "unused"
+            ),
+            None,
+        )
+
+        if apply == "rate":
+            value = base + equip
+            if mod:
+                value += int(equip * mod["value"] / 100)
+
+        elif apply == "flat":
+            value = base + equip + (mod["value"] if mod else 0)
+
+        else:
+            value = base
+
+        result[key] = num(value)
+
+    return result
+
+
 def serialize_job(row) -> dict:
     return {
         "jobid": row["jobid"],
@@ -1173,6 +1226,12 @@ def character_page(charid: str):
 @app.get("/stats")
 def stats_page():
     return render_template("stats.html")
+
+
+@app.get("/help")
+def help_page():
+    """系统内帮助页：数据来源、字段口径、检索用法。"""
+    return render_template("help.html")
 
 
 ENEMY_ART_DIR = os.environ.get("ARMSBANK_ENEMY_ART_DIR") or os.path.join(BASE_DIR, "data", "enemy_art")
@@ -1487,26 +1546,15 @@ def api_search():
         limit = 60
 
     where, params = search_conditions(tokens)
+    arms_by_char: dict[str, list[dict]] = {}
+    ammo_by_char: dict[str, list[str]] = {}
+    sort_stats_by_char: dict[str, dict] = {}
 
-    arms_sql = f"""
-        SELECT a.armsid, a.name, a.charid, a.variant, a.number,
-               a.exclusive_skill, a.dolls_skill, a.arms_skill
-        FROM arms a
-        WHERE a.charid = ANY(%s)
-        ORDER BY a.charid,
-                 CASE a.variant
-                      WHEN '原型'   THEN 0
-                      WHEN '改型'   THEN 1
-                      WHEN '特改型' THEN 2
-                      ELSE 3
-                 END,
-                 a.armsid
-    """
-
+    # 所有数据库读取都在连接上下文内完成；离开 with 后只处理 Python 数据。
     with get_conn() as conn:
         cur = conn.cursor()
-        # 分组用的三样：兵种 / 体型（机体表既有列）、弹药（arms_ammo，可能还没建好）
         has_ammo = ensure_arms_ammo_table(conn)
+
         char_sql = f"""
             SELECT c.charid, c.name, c.rarity, c.affiliation, c.college,
                    c.number, c.description, c.arms_count, c.variants,
@@ -1517,25 +1565,76 @@ def api_search():
             ORDER BY c.rarity DESC NULLS LAST, c.name
         """
         chars = cur.execute(char_sql, params).fetchall()
-        arms_by_char: dict[str, list[dict]] = {}
-        ammo_by_char: dict[str, list[str]] = {}
 
         if chars:
             charids = [row["charid"] for row in chars]
-            for row in cur.execute(arms_sql, (charids,)).fetchall():
-                arms_by_char.setdefault(row["charid"], []).append(
-                    {
-                        "armsid": row["armsid"],
-                        "name": row["name"],
-                        "variant": row["variant"],
-                        "number": row["number"],
-                        "exclusive_skill": row["exclusive_skill"] or "",
-                        "dolls_skill": row["dolls_skill"] or "",
-                        "arms_skill": row["arms_skill"] or "",
-                    }
+
+            # 读取兵装数值和职能数据，供角色卡片排序使用。
+            equip_ready = ensure_equip_table(conn)
+            jobs_by_id = fetch_jobs(cur)
+
+            detailed_arms = cur.execute(
+                arms_query(
+                    """
+                    WHERE a.charid = ANY(%s)
+                    ORDER BY a.charid,
+                             CASE a.variant
+                                 WHEN '原型' THEN 0
+                                 WHEN '改型' THEN 1
+                                 WHEN '特改型' THEN 2
+                                 ELSE 3
+                             END,
+                             a.armsid
+                    """,
+                    with_equip=equip_ready,
+                    with_images=False,
+                ),
+                (charids,),
+            ).fetchall()
+
+            # 与角色详情接口使用相同的职能关联规则和顺序。
+            link_jobs: dict[str, list[int]] = {}
+            arm_ids = [row["armsid"] for row in detailed_arms]
+            if arm_ids:
+                links = cur.execute(
+                    """
+                    SELECT armsid, jobid
+                    FROM arms_jobs
+                    WHERE armsid = ANY(%s)
+                    ORDER BY armsid, jobid
+                    """,
+                    (arm_ids,),
+                ).fetchall()
+                for link in links:
+                    link_jobs.setdefault(link["armsid"], []).append(int(link["jobid"]))
+
+            for row in detailed_arms:
+                ids = job_ids_for(row, link_jobs, jobs_by_id)
+                default_job = jobs_by_id[ids[0]] if ids else None
+
+                arm_data = {
+                    "armsid": row["armsid"],
+                    "name": row["name"],
+                    "variant": row["variant"],
+                    "number": row["number"],
+                    "exclusive_skill": row["exclusive_skill"] or "",
+                    "dolls_skill": row["dolls_skill"] or "",
+                    "arms_skill": row["arms_skill"] or "",
+                    "sort_stats": calculate_sort_stats(row, default_job),
+                }
+                arms_by_char.setdefault(row["charid"], []).append(arm_data)
+
+            # 默认机体口径与 api_character() 保持一致：改型 > 原型 > 第一台。
+            for charid, arms in arms_by_char.items():
+                default_arm = (
+                    next((a for a in arms if a["variant"] == "改型"), None)
+                    or next((a for a in arms if a["variant"] == "原型"), None)
+                    or (arms[0] if arms else None)
                 )
+                if default_arm:
+                    sort_stats_by_char[charid] = default_arm["sort_stats"]
+
             if has_ammo:
-                # 弹药在接口里按 通常/穿甲/高爆/燃烧 的固定顺序拼，不依赖数据库排序规则
                 for row in cur.execute(AMMO_SQL, (charids,)).fetchall():
                     bucket = ammo_by_char.setdefault(row["charid"], [])
                     if row["ammo"] not in bucket:
@@ -1582,36 +1681,34 @@ def api_search():
             for hit in arm["skill_hits"]:
                 if hit not in skill_matched:
                     skill_matched.append(hit)
-        characters.append(
-            {
-                "charid": ch["charid"],
-                "name": ch["name"],
-                "rarity": ch["rarity"],
-                "affiliation": ch["affiliation"],
-                "college": ch["college"],
-                "number": ch["number"],
-                "description": ch["description"],
-                "arms_count": ch["arms_count"],
-                "variants": ch["variants"],
-                "arms_type": ch["arms_type"] or "",
-                "body": ch["body"] or "",
-                "ammo": sort_ammo(ammo_by_char.get(ch["charid"], [])),
-                "name_matched": name_hit(ch),
-                "skill_matched": skill_matched,
-                "arms": arms,
-            }
-        )
 
-    return jsonify(
-        {
-            "keyword": keyword,
-            "tokens": tokens,
-            "total": total,
-            "count": len(characters),
-            "limit": limit,
-            "characters": characters,
-        }
-    )
+        characters.append({
+            "charid": ch["charid"],
+            "name": ch["name"],
+            "rarity": ch["rarity"],
+            "affiliation": ch["affiliation"],
+            "college": ch["college"],
+            "number": ch["number"],
+            "description": ch["description"],
+            "arms_count": ch["arms_count"],
+            "variants": ch["variants"],
+            "arms_type": ch["arms_type"] or "",
+            "body": ch["body"] or "",
+            "ammo": sort_ammo(ammo_by_char.get(ch["charid"], [])),
+            "sort_stats": sort_stats_by_char.get(ch["charid"], {}),
+            "name_matched": name_hit(ch),
+            "skill_matched": skill_matched,
+            "arms": arms,
+        })
+
+    return jsonify({
+        "keyword": keyword,
+        "tokens": tokens,
+        "total": total,
+        "count": len(characters),
+        "limit": limit,
+        "characters": characters,
+    })
 
 
 @app.get("/api/character/<charid>")
@@ -1648,7 +1745,7 @@ def api_character(charid: str):
         ammo_map: dict[str, list[str]] = {}
         if arms_ids:
             for link in cur.execute(
-                "SELECT armsid, jobid FROM arms_jobs WHERE armsid = ANY(%s)",
+                "SELECT armsid, jobid FROM arms_jobs WHERE armsid = ANY(%s) ORDER BY armsid, jobid",
                 (arms_ids,),
             ).fetchall():
                 link_jobs.setdefault(link["armsid"], []).append(int(link["jobid"]))

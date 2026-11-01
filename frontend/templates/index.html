@@ -5,6 +5,7 @@
   <nav class="tabs" id="tabs" aria-label="数据分类"></nav>
   <p class="status" id="status">正在读取……</p>
   <div class="facets" id="facets" hidden></div>
+  <div class="sortbar" id="sortbar" hidden></div>
   <div class="results" id="results"></div>
 
   <div class="drawer-back" id="drawerBack" hidden></div>
@@ -19,6 +20,7 @@ const statusBox = document.getElementById('status');
 const resultsBox = document.getElementById('results');
 const tabsBox = document.getElementById('tabs');
 const facetsBox = document.getElementById('facets');
+const sortbarBox = document.getElementById('sortbar');
 const drawer = document.getElementById('drawer');
 const drawerBack = document.getElementById('drawerBack');
 
@@ -48,7 +50,9 @@ let timer = null;
 let controller = null;
 let overview = null;
 let currentGroup = null;   // 抽屉里正在看的条目
-let filters = { nation: '', body: '', arms: '', ammo: '' };  // 角色库的分组筛选：维度 -> 选中的值
+let filters = { nation: '', body: '', arms: '', ammo: '', rarity: '' };  // 角色库筛选：维度 -> 选中的值
+let sortKey = '';       // 默认保持后端原始顺序
+let sortDirection = 'desc'; // 数值排序默认从高到低
 let openFacet = '';        // 哪一个维度展开着
 let lastChars = [];        // 最近一次搜索拿回来的整份角色（筛选前）
 let lastKeyword = '';
@@ -70,7 +74,19 @@ function nationValues(ch) {
   return out.length ? out : ['未标注'];
 }
 
-// 四个分组维度：点一下展开它的选项，选一个就把列表缩到只剩符合的
+// 角色卡片排序属性（使用后端按详情页公式计算的最终面板）
+const SORT_OPTIONS = [
+  ['hp', '生命'],
+  ['armor', '装甲'],
+  ['mobility', '机动'],
+  ['ground_fire', '对地火力'],
+  ['air_fire', '对空火力'],
+  ['hit', '命中'],
+  ['penetration', '贯通'],
+];
+const SORT_LABELS = Object.fromEntries(SORT_OPTIONS);
+
+// 五个分组维度：点一下展开它的选项，选一个就把列表缩到只剩符合的
 const FACETS = [
   { key: 'nation', label: '学联', order: ['黑十字帝国学联', '王立白蔷薇学联', '星尘联邦学联',
     '红十月同盟学联', '极东重钢学联', '维修会'], values: nationValues },
@@ -80,6 +96,8 @@ const FACETS = [
     values: (ch) => [ch.arms_type || '未标注'] },
   { key: 'ammo', label: '弹药', order: AMMO_ORDER,
     values: (ch) => String(ch.ammo || '').split('/').map((s) => s.trim()).filter(Boolean) },
+  { key: 'rarity', label: '星级', order: ['1星', '2星', '3星'],
+    values: (ch) => ch.rarity ? [String(ch.rarity) + '星'] : [] },
 ];
 
 function facetOn() {
@@ -92,7 +110,23 @@ function hitFacet(f, ch) {
 }
 
 function filteredChars() {
-  return lastChars.filter((ch) => FACETS.every((f) => hitFacet(f, ch)));
+  const chars = lastChars.filter((ch) => FACETS.every((f) => hitFacet(f, ch)));
+  if (!sortKey) return chars;
+
+  return chars.slice().sort((a, b) => {
+    const av = a.sort_stats ? a.sort_stats[sortKey] : null;
+    const bv = b.sort_stats ? b.sort_stats[sortKey] : null;
+    const aMissing = av == null || av === '' || !Number.isFinite(Number(av));
+    const bMissing = bv == null || bv === '' || !Number.isFinite(Number(bv));
+
+    // 缺少面板数据的角色始终排在最后
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+
+    const diff = Number(av) - Number(bv);
+    return sortDirection === 'asc' ? diff : -diff;
+  });
 }
 
 function el(tag, cls, text) {
@@ -147,6 +181,10 @@ function syncUrl(keyword) {
   if (cat !== 'character') p.set('cat', cat);
   if (cat === 'character') {
     for (const f of FACETS) if (filters[f.key]) p.set(f.key, filters[f.key]);
+    if (sortKey) {
+      p.set('sort', sortKey);
+      p.set('dir', sortDirection);
+    }
   }
   if (keyword) p.set('q', keyword);
   const qs = p.toString();
@@ -623,9 +661,71 @@ function orderValues(f, counts) {
   return known.concat(rest);
 }
 
+function renderSortControls() {
+  sortbarBox.hidden = cat !== 'character';
+  sortbarBox.replaceChildren();
+  if (cat !== 'character') return;
+
+  sortbarBox.style.cssText = [
+    'display:flex', 'align-items:center', 'flex-wrap:wrap',
+    'gap:8px', 'margin:10px 0 14px'
+  ].join(';');
+
+  const label = el('span', 'sort-label', '排序');
+  label.style.cssText = 'font-size:13px;color:var(--muted, #8b929d)';
+  sortbarBox.appendChild(label);
+
+  const select = document.createElement('select');
+  select.className = 'sort-select';
+  select.setAttribute('aria-label', '角色卡片排序属性');
+  select.style.cssText = [
+    'min-width:130px', 'max-width:100%', 'padding:7px 10px',
+    'border:1px solid var(--line, #3a3f48)', 'border-radius:8px',
+    'background:var(--panel, #20242b)', 'color:inherit',
+    'font:inherit', 'font-size:13px'
+  ].join(';');
+
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = '默认顺序';
+  select.appendChild(defaultOption);
+
+  for (const [key, name] of SORT_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  select.value = sortKey;
+  select.addEventListener('change', () => {
+    sortKey = select.value;
+    applyFilters();
+  });
+  sortbarBox.appendChild(select);
+
+  const direction = el('button', 'sort-direction',
+    sortDirection === 'desc' ? '从高到低 ↓' : '从低到高 ↑');
+  direction.type = 'button';
+  direction.setAttribute('aria-label', '切换排序方向');
+  direction.style.cssText = [
+    'padding:7px 10px', 'border:1px solid var(--line, #3a3f48)',
+    'border-radius:8px', 'background:var(--panel, #20242b)',
+    'color:inherit', 'font:inherit', 'font-size:13px', 'cursor:pointer'
+  ].join(';');
+  direction.disabled = !sortKey;
+  direction.style.opacity = sortKey ? '1' : '0.5';
+  direction.addEventListener('click', () => {
+    if (!sortKey) return;
+    sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+    applyFilters();
+  });
+  sortbarBox.appendChild(direction);
+}
+
 function renderFacets() {
   facetsBox.hidden = cat !== 'character';
   facetsBox.replaceChildren();
+  renderSortControls();
   if (cat !== 'character') return;
 
   for (const f of FACETS) {
@@ -682,7 +782,7 @@ function renderFacets() {
     clear.type = 'button';
     clear.addEventListener('click', (e) => {
       e.stopPropagation();
-      filters = { nation: '', body: '', arms: '', ammo: '' };
+      filters = { nation: '', body: '', arms: '', ammo: '', rarity: '' };
       openFacet = '';
       applyFilters();
     });
@@ -706,10 +806,13 @@ function updateStatus() {
   const mid = picks.length
     ? `，按 ${picks.join(' · ')} 筛选后剩 ${shown} 个`
     : `，按稀有度显示 ${shown} 个`;
+  const sorting = sortKey
+    ? `；按${SORT_LABELS[sortKey]}${sortDirection === 'desc' ? '从高到低' : '从低到高'}排序`
+    : '';
   const tail = lastKeyword
     ? '；可搜角色名，也可搜 专属 / DOLLS / 改造 技能名。'
     : '；输入角色名或技能名可精确查找。';
-  statusBox.textContent = head + mid + tail;
+  statusBox.textContent = head + mid + sorting + tail;
 }
 
 function renderCharacters(characters, keyword) {
@@ -832,6 +935,10 @@ for (const f of FACETS) {
   const v = params.get(f.key);
   if (v) filters[f.key] = v;
 }
+const initialSort = params.get('sort');
+if (SORT_OPTIONS.some(([key]) => key === initialSort)) sortKey = initialSort;
+const initialDirection = params.get('dir');
+if (initialDirection === 'asc' || initialDirection === 'desc') sortDirection = initialDirection;
 renderFacets();
 const initial = params.get('q') || '';
 input.value = initial;

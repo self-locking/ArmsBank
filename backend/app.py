@@ -1687,14 +1687,14 @@ def api_character(charid: str):
             skill_map.get(row["armsid"])
         )
 
-    # 按固定顺序排列弹药
-    ammo_names = ammo_map.get(row["armsid"], [])
-    arm_data["ammo"] = (
-        [name for name in AMMO_ORDER if name in ammo_names]
-        + sorted(name for name in ammo_names if name not in AMMO_ORDER)
-    )
+        # 按固定顺序排列弹药
+        ammo_names = ammo_map.get(row["armsid"], [])
+        arm_data["ammo"] = (
+            [name for name in AMMO_ORDER if name in ammo_names]
+            + sorted(name for name in ammo_names if name not in AMMO_ORDER)
+        )
 
-    arms.append(arm_data)
+        arms.append(arm_data)
 
     # 默认看改型；没有改型就看原型
     default_arm = next((a for a in arms if a["variant"] == "改型"), None) \

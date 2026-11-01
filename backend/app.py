@@ -1633,6 +1633,7 @@ def api_character(charid: str):
         ready = ensure_equip_table(conn)
         has_images = ensure_images_table(conn)
         has_skills = ensure_skills_table(conn)
+        has_ammo = ensure_arms_ammo_table(conn)
         arms_rows = cur.execute(
             arms_query("WHERE a.charid = %s ORDER BY CASE a.variant "
                        "WHEN '原型' THEN 0 WHEN '改型' THEN 1 "
@@ -1644,6 +1645,7 @@ def api_character(charid: str):
         arms_ids = [row["armsid"] for row in arms_rows]
         link_jobs: dict[str, list[int]] = {}
         skill_map: dict[str, list[dict]] = {}
+        ammo_map: dict[str, list[str]] = {}
         if arms_ids:
             for link in cur.execute(
                 "SELECT armsid, jobid FROM arms_jobs WHERE armsid = ANY(%s)",
@@ -1658,14 +1660,41 @@ def api_character(charid: str):
                     (arms_ids,),
                 ).fetchall():
                     skill_map.setdefault(r["armsid"], []).append(r)
+            if has_ammo:
+                for r in cur.execute(
+                    """
+                    SELECT armsid, ammo
+                    FROM arms_ammo
+                    WHERE armsid = ANY(%s)
+                    """,
+                    (arms_ids,),
+                ).fetchall():
+                    ammo_map.setdefault(r["armsid"], []).append(r["ammo"])
 
     arms = []
     used_jobs: dict[int, dict] = {}
+
     for row in arms_rows:
         ids = job_ids_for(row, link_jobs, jobs_by_id)
+
         for jid in ids:
             used_jobs[jid] = jobs_by_id[jid]
-        arms.append(serialize_arms(row, ids, jobs_by_id, skill_map.get(row["armsid"])))
+
+        arm_data = serialize_arms(
+            row,
+            ids,
+            jobs_by_id,
+            skill_map.get(row["armsid"])
+        )
+
+    # 按固定顺序排列弹药
+    ammo_names = ammo_map.get(row["armsid"], [])
+    arm_data["ammo"] = (
+        [name for name in AMMO_ORDER if name in ammo_names]
+        + sorted(name for name in ammo_names if name not in AMMO_ORDER)
+    )
+
+    arms.append(arm_data)
 
     # 默认看改型；没有改型就看原型
     default_arm = next((a for a in arms if a["variant"] == "改型"), None) \

@@ -232,7 +232,16 @@ function paintArm() {
   armName.textContent = arm.name || arm.armsid;
   armTag.textContent = arm.variant || '';
   armTag.hidden = !arm.variant;
-  armSub.textContent = [arm.number, arm.arms_type, arm.size].filter(Boolean).join(' · ');
+  const ammoText = arm.ammo && arm.ammo.length
+    ? arm.ammo.join(' / ')
+    : '';
+
+  armSub.textContent = [
+    arm.number,
+    arm.arms_type,
+    arm.size,
+    ammoText
+  ].filter(Boolean).join(' · ');
 
   for (const t of vtabBox.children) {
     t.classList.toggle('active', t.dataset.armid === arm.armsid);

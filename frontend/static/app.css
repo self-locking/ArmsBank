@@ -973,7 +973,9 @@ body::before {
 .card, .item-card, .chead, .arm-main, .skillblock, .jobbox, .portrait {
   background-color: rgba(255, 255, 255, .78);
 }
-.card, .item-card, .chead, .arm-main { backdrop-filter: blur(1.5px); }
+.chead, .arm-main {
+  backdrop-filter: blur(1.5px);
+}
 
 /* —— 立绘框：按学联铺背景（图片由 character.html 内联设置） —— */
 /* 背景作为独立图层：调淡 + 轻微模糊 + 中间提亮，只衬托立绘，不抢戏 */

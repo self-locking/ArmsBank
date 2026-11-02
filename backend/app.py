@@ -31,6 +31,7 @@ from decimal import Decimal
 
 import psycopg
 from flask import Flask, jsonify, render_template, request, send_from_directory
+from urllib.parse import quote as _quote
 from psycopg.rows import dict_row
 
 # ---------------------------------------------------------------- 目录
@@ -1258,6 +1259,113 @@ def nation_file(filename: str):
     if not os.path.isdir(NATION_DIR):
         return jsonify({"error": f"学联背景目录不存在：{NATION_DIR}"}), 404
     return send_from_directory(NATION_DIR, filename, max_age=604800)
+
+
+# ---------------------------------------------------------------- 音乐（背景音乐播放器）
+# 音频不入库：56 个 wav 直接放在 data/music/，按 "编号_名称.wav" 命名，
+# 这里只把文件名列出来给前端，由 /music/<文件名> 送出。
+MUSIC_DIR = os.environ.get("ARMSBANK_MUSIC_DIR") or os.path.join(BASE_DIR, "data", "music")
+
+_MUSIC_CACHE = {"sig": None, "tracks": []}
+
+
+def _music_tracks():
+    """扫描 data/music/，返回 [{file, name, order}]，按编号排序。
+
+    文件名形如 001_Comfy.wav：展示名取第一个下划线之后的部分。
+    """
+    if not os.path.isdir(MUSIC_DIR):
+        return []
+    try:
+        entries = []
+        for name in os.listdir(MUSIC_DIR):
+            low = name.lower()
+            if not low.endswith(".wav"):
+                continue
+            stem = name[:-4]
+            order, _, title = stem.partition("_")
+            if not title:
+                order, title = "", stem
+            entries.append({"file": name, "name": title.strip(), "order": order})
+        sig = (len(entries), max((e["file"] for e in entries), default=""))
+        if _MUSIC_CACHE["sig"] != sig:
+            entries.sort(key=lambda x: (x["order"], x["name"]))
+            _MUSIC_CACHE["tracks"] = entries
+            _MUSIC_CACHE["sig"] = sig
+        return _MUSIC_CACHE["tracks"]
+    except OSError:
+        return []
+
+
+@app.get("/api/music")
+def api_music():
+    tracks = _music_tracks()
+    return jsonify({"ok": True, "count": len(tracks), "tracks": tracks})
+
+
+@app.get("/music/<path:filename>")
+def music_file(filename: str):
+    """音频文件。只在 data/music/ 里找，且必须是 .wav。"""
+    if not filename.lower().endswith(".wav"):
+        return jsonify({"error": "只提供 wav"}), 404
+    if not os.path.isdir(MUSIC_DIR):
+        return jsonify({"error": f"音乐目录不存在：{MUSIC_DIR}"}), 404
+    return send_from_directory(MUSIC_DIR, filename, max_age=86400)
+
+
+# ---------------------------------------------------------------- 历史档案（角色详情附加板块）
+# data/history/pic/DOL1001.jpg + data/history/txt/DOL1001.txt，文件名即角色ID。
+# 没有对应文件的角色不显示这一块（目前只覆盖了不到 30 个角色）。
+HISTORY_DIR = os.environ.get("ARMSBANK_HISTORY_DIR") or os.path.join(BASE_DIR, "data", "history")
+HISTORY_PIC = os.path.join(HISTORY_DIR, "pic")
+HISTORY_TXT = os.path.join(HISTORY_DIR, "txt")
+
+_HISTORY_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _history_for(charid: str):
+    """返回该角色的历史档案；找不到返回 None。"""
+    cid = (charid or "").strip()
+    if not cid or not cid.replace("-", "").isalnum():
+        return None
+    image = None
+    for ext in _HISTORY_EXT:
+        cand = os.path.join(HISTORY_PIC, cid + ext)
+        if os.path.isfile(cand):
+            image = cid + ext
+            break
+    text = None
+    txt_path = os.path.join(HISTORY_TXT, cid + ".txt")
+    if os.path.isfile(txt_path):
+        try:
+            with open(txt_path, encoding="utf-8-sig") as fh:
+                text = fh.read().strip()
+        except OSError:
+            text = None
+    if not image and not text:
+        return None
+    return {"charid": cid, "image": image, "text": text}
+
+
+@app.get("/api/history/<charid>")
+def api_history(charid: str):
+    item = _history_for(charid)
+    if item is None:
+        return jsonify({"ok": True, "found": False})
+    payload = {"ok": True, "found": True, "charid": item["charid"], "text": item["text"]}
+    if item["image"]:
+        payload["image"] = "/history/" + _quote(item["image"])
+    return jsonify(payload)
+
+
+@app.get("/history/<path:filename>")
+def history_file(filename: str):
+    """历史图片（只从 data/history/pic/ 送）。"""
+    if not filename.lower().endswith(_HISTORY_EXT):
+        return jsonify({"error": "不支持的图片格式"}), 404
+    if not os.path.isdir(HISTORY_PIC):
+        return jsonify({"error": f"历史图片目录不存在：{HISTORY_PIC}"}), 404
+    return send_from_directory(HISTORY_PIC, filename, max_age=604800)
 
 
 @app.get("/enemy_art/<path:filename>")

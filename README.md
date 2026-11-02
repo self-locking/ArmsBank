@@ -40,7 +40,11 @@ armsbank_app/
 │  ├─ armsbank_阿兹班石表.csv      90 行（→ azbans）
 │  ├─ armsbank_机体弹药表.csv     730 行（→ arms_ammo）
 │  ├─ arms_images/              1091 张角色立绘（Normal / Battle，webp）
-│  └─ enemy_art/                194 张敌人战斗贴图（webp）
+│  ├─ enemy_art/                194 张敌人战斗贴图（webp）
+│  ├─ music/                    56 个背景音乐（wav，命名「编号_名称.wav」）
+│  └─ history/                  角色历史档案（目前 28 组）
+│     ├─ pic/                   历史图片（DOLxxxx.jpg）
+│     └─ txt/                   历史描述（DOLxxxx.txt）
 ├─ requirements.txt             依赖清单（Flask 3.1 + psycopg 3.3）
 ├─ .venv/                       运行环境（Flask 3.1 + psycopg 3.3）
 └─ README.md                    本文件
@@ -48,6 +52,10 @@ armsbank_app/
 
 > 立绘和敌人贴图都不入库：库里只存文件名，`/img/<文件名>` 与 `/enemy_art/<文件名>`
 > 直接从 `data/arms_images/`、`data/enemy_art/` 读磁盘。
+>
+> 音乐和历史档案同理，**不建表**：它们是一批按文件名就能定位到资源的静态文件
+> （`001_Comfy.wav`、`DOL1001.jpg`），放进数据库只会让备份变大、还得维护路径字段。
+> 沿用「二进制资源只存路径、数据库存结构化数据」的划分。
 
 ---
 
@@ -170,6 +178,19 @@ set ARMSBANK_IMAGE_DIR=C:\path\to\arms_images\images
 | `GET /api/azbans?q=` | 阿兹班石（90 条按基础名合并成 74 组，通用的在前、专属的在后） |
 | `GET /api/overview` | 各类数据条数（用于首页提示数据是否就绪） |
 | `GET /img/<filename>` | 立绘文件（带 7 天缓存） |
+| `GET /api/music` | 曲目清单：文件名、展示名、编号（扫描 `data/music/`） |
+| `GET /music/<filename>` | 音频文件（只送 .wav，1 天缓存） |
+| `GET /api/history/<charid>` | 该角色的历史档案（图片地址 + 描述）；没有则 `found: false` |
+| `GET /history/<filename>` | 历史图片（只从 `data/history/pic/` 送） |
+
+**背景音乐播放器**：左下角一个悬浮的 `♪` 按钮，点开是抽屉式曲目列表（可关闭）。
+曲目按「编号_名称.wav」排序，列表里只显示名称；点一首就开始播放，再点「暂停 / 播放」控制。
+音频和立绘一样**不入库**——56 个 wav 放 `data/music/`，后端扫描目录给前端一份清单。
+
+**角色历史档案**：详情页底部多一块「历史」，一张图片 + 一段描述。
+数据在 `data/history/`，图片 `pic/DOLxxxx.jpg`、描述 `txt/DOLxxxx.txt`，**文件名就是角色ID**。
+目前只写了 28 个角色，**没有对应文件的角色这一块整个不显示**（前端拿到 `found: false` 就不渲染），
+所以不会出现空白框。
 
 详情页的交互：
 

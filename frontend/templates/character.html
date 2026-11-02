@@ -372,12 +372,51 @@ function render(data) {
   selectArm(start);
 }
 
+/* ---------------- 历史档案（没有数据就不显示） ---------------- */
+
+const HISTORY_EXT_HINT = '图片与描述由 data/history/ 提供，按角色ID（DOLxxxx）对应';
+
+function renderHistory(host, item) {
+  if (!item || !item.found) return;
+  const sec = el('section', 'historybox');
+  const h = el('h2', 'hhead', '历史');
+  h.title = HISTORY_EXT_HINT;
+  sec.appendChild(h);
+
+  if (item.image) {
+    const fig = el('figure', 'hfig');
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.src = item.image;
+    img.alt = '历史图片';
+    fig.appendChild(img);
+    sec.appendChild(fig);
+  }
+  if (item.text) sec.appendChild(el('p', 'htext', item.text));
+  sec.appendChild(el('p', 'hsrc', '图片与文本来自维基百科'));
+  host.appendChild(sec);
+}
+
+async function loadHistory(charid) {
+  try {
+    const res = await fetch('/api/history/' + encodeURIComponent(charid));
+    if (!res.ok) return;
+    const item = await res.json();
+    if (!item || !item.found) return;      // 这个角色还没有历史档案，整块不显示
+    renderHistory(detail, item);
+  } catch (e) {
+    /* 历史档案是可选内容，失败就当没有 */
+  }
+}
+
 async function load() {
   try {
     const res = await fetch('/api/character/' + encodeURIComponent(CHARID));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '读取失败');
     render(data);
+    loadHistory(data.charid || CHARID);
   } catch (err) {
     detail.replaceChildren(el('p', 'empty', '出错了：' + err.message));
   }

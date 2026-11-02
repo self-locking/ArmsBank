@@ -66,6 +66,293 @@
     {% block main %}{% endblock %}
   </main>
 
+
+  <!-- 背景音乐播放器：左下角悬浮按钮，点开是抽屉式曲目列表。
+       状态（曲目 / 进度 / 是否在放 / 抽屉是否打开）存 sessionStorage，
+       换页或切角色后自动接着放。 -->
+  <div class="music-wrap" id="musicWrap">
+    <button class="music-btn" id="musicBtn" type="button" title="背景音乐" aria-label="背景音乐">
+      <span class="music-note">♪</span>
+    </button>
+    <div class="music-panel" id="musicPanel" hidden>
+      <div class="music-head">
+        <span class="music-title">背景音乐</span>
+        <button class="music-close" id="musicClose" type="button" aria-label="关闭">✕</button>
+      </div>
+      <div class="music-now"><span id="musicNow">未播放</span></div>
+      <div class="music-actions">
+        <button class="music-play" id="musicToggle" type="button" disabled>播放</button>
+        <span class="music-hint" id="musicHint">点击曲目开始播放</span>
+      </div>
+      <div class="music-list" id="musicList"><p class="music-empty">读取曲目……</p></div>
+    </div>
+  </div>
+  <audio id="musicAudio" preload="none"></audio>
+
+  <script>
+  (function () {
+    const KEY = 'armsbank-music-v1';
+    const wrap = document.getElementById('musicWrap');
+    const btn = document.getElementById('musicBtn');
+    const panel = document.getElementById('musicPanel');
+    const closeBtn = document.getElementById('musicClose');
+    const listBox = document.getElementById('musicList');
+    const audio = document.getElementById('musicAudio');
+    const nowEl = document.getElementById('musicNow');
+    const toggleBtn = document.getElementById('musicToggle');
+    const hintEl = document.getElementById('musicHint');
+
+    let tracks = null;
+    let loading = false;
+    let currentFile = null;
+    let lastSave = 0;
+
+    function readState() {
+      try { return JSON.parse(sessionStorage.getItem(KEY) || 'null') || {}; } catch (e) { return {}; }
+    }
+    function writeState(patch) {
+      const s = readState();
+      Object.assign(s, patch);
+      try { sessionStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+    }
+
+    function syncToggle() {
+      const paused = audio.paused || !currentFile;
+      toggleBtn.disabled = !currentFile;
+      toggleBtn.textContent = paused ? '播放' : '暂停';
+      btn.classList.toggle('on', !paused);
+    }
+
+    function markActive() {
+      for (const it of listBox.querySelectorAll('.music-item')) {
+        it.classList.toggle('active', it.dataset.file === currentFile);
+      }
+    }
+
+    function openPanel(open) {
+      panel.hidden = !open;
+      wrap.classList.toggle('open', open);
+      if (open) ensureTracks();
+    }
+
+    function playFile(file, name, resumeAt) {
+      currentFile = file;
+      audio.src = '/music/' + encodeURIComponent(file);
+      nowEl.textContent = name || file;
+      if (resumeAt) {
+        audio.addEventListener('loadedmetadata', function once() {
+          audio.removeEventListener('loadedmetadata', once);
+          try { audio.currentTime = resumeAt; } catch (e) {}
+        });
+      }
+      const p = audio.play();
+      if (p && p.catch) {
+        p.catch(function () {
+          hintEl.textContent = '浏览器拦了自动播放，点「播放」继续';
+          syncToggle();
+        });
+      }
+      hintEl.textContent = '正在播放';
+      writeState({ file: file, name: name || file, playing: true, time: resumeAt || 0 });
+      markActive();
+    }
+
+    function renderList(items) {
+      listBox.replaceChildren();
+      if (!items.length) {
+        const p = document.createElement('p');
+        p.className = 'music-empty';
+        p.textContent = 'data/music 下没有找到 wav 文件';
+        listBox.appendChild(p);
+        return;
+      }
+      for (const t of items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'music-item';
+        b.dataset.file = t.file;
+        b.title = t.file;
+        const n = document.createElement('span');
+        n.className = 'mi-name';
+        n.textContent = t.name;
+        const o = document.createElement('span');
+        o.className = 'mi-order';
+        o.textContent = t.order || '';
+        b.append(n, o);
+        b.addEventListener('click', function () { playFile(t.file, t.name, 0); });
+        listBox.appendChild(b);
+      }
+      markActive();
+    }
+
+    async function ensureTracks() {
+      if (tracks || loading) return;
+      loading = true;
+      try {
+        const res = await fetch('/api/music');
+        const data = await res.json();
+        tracks = (data && data.tracks) || [];
+        renderList(tracks);
+      } catch (err) {
+        listBox.replaceChildren();
+        const p = document.createElement('p');
+        p.className = 'music-empty';
+        p.textContent = '读取曲目失败：' + err.message;
+        listBox.appendChild(p);
+      } finally {
+        loading = false;
+      }
+    }
+
+    btn.addEventListener('click', function () {
+      const willOpen = panel.hidden;
+      openPanel(willOpen);
+      writeState({ panel: willOpen });
+    });
+
+    closeBtn.addEventListener('click', function () {
+      openPanel(false);
+      writeState({ panel: false });
+    });
+
+    toggleBtn.addEventListener('click', function () {
+      if (!currentFile) return;
+      if (audio.paused) {
+        audio.play().then(function () {
+          hintEl.textContent = '正在播放';
+        }).catch(function () {
+          hintEl.textContent = '播放失败，再点一次试试';
+        });
+      } else {
+        audio.pause();
+      }
+    });
+
+    audio.addEventListener('play', function () {
+      syncToggle();
+      writeState({ playing: true });
+    });
+    audio.addEventListener('pause', function () {
+      syncToggle();
+      writeState({ playing: false });
+    });
+    audio.addEventListener('ended', function () {
+      syncToggle();
+      writeState({ playing: false, time: 0 });
+      hintEl.textContent = '放完了，点一曲继续';
+    });
+    audio.addEventListener('timeupdate', function () {
+      const t = Math.floor(audio.currentTime || 0);
+      if (t === lastSave) return;          // 每秒存一次就够
+      lastSave = t;
+      writeState({ time: t });
+    });
+
+    // ---- 页面加载：接着上次的状态继续 ----
+    const saved = readState();
+    if (saved.panel) openPanel(true);
+    if (saved.file) {
+      currentFile = saved.file;
+      nowEl.textContent = saved.name || saved.file;
+      audio.src = '/music/' + encodeURIComponent(saved.file);
+      audio.addEventListener('loadedmetadata', function restore() {
+        audio.removeEventListener('loadedmetadata', restore);
+        if (saved.time) { try { audio.currentTime = saved.time; } catch (e) {} }
+        if (saved.playing !== false) {
+          const p = audio.play();
+          if (p && p.catch) {
+            p.catch(function () {
+              hintEl.textContent = '点「播放」接着听';
+              syncToggle();
+            });
+          }
+        }
+        syncToggle();
+      });
+      // 有些浏览器不触发 loadedmetadata（缓存已失效），兜一层
+      setTimeout(syncToggle, 400);
+    }
+    syncToggle();
+  })();
+  </script>
+
+  <!-- 站内跳转改成局部换页：只替换 <main>，音频、音乐状态、主题都不重载。
+       页面自己的内联脚本会被重新执行（包在 IIFE 里，避免 const 重复声明）。 -->
+  <script>
+  (function () {
+    const MARK = 'dsh-spa-router';
+    if (window.__dshSpa) return;
+    window.__dshSpa = true;
+
+    function mainEl(doc) {
+      return (doc || document).querySelector('main.wrap') || (doc || document).querySelector('main');
+    }
+
+    async function navigate(url, push) {
+      const res = await fetch(url, { headers: { 'X-Requested-With': 'spa' }, cache: 'no-cache' });
+      if (!res.ok) return false;
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const fresh = mainEl(doc);
+      const cur = mainEl();
+      if (!fresh || !cur) return false;
+
+      document.title = doc.title || document.title;
+      const nodes = Array.from(fresh.childNodes).map(function (n) { return document.importNode(n, true); });
+      cur.replaceChildren.apply(cur, nodes);
+      window.scrollTo(0, 0);
+      if (push) history.pushState({ spa: 1 }, '', url);
+
+      // 只执行「页面自己的」脚本：排除 base 里的主题、音乐和本路由
+      const codes = Array.from(doc.querySelectorAll('body script'))
+        .filter(function (s) { return !s.src; })
+        .map(function (s) { return s.textContent || ''; })
+        .filter(function (t) {
+          return t && t.indexOf('armsbank-music-v1') === -1
+            && t.indexOf('armsbank-theme') === -1
+            && t.indexOf(MARK) === -1;
+        });
+      for (const code of codes) {
+        const el = document.createElement('script');
+        el.textContent = '(function(){' + code + '\n})();';
+        document.body.appendChild(el);
+        el.remove();
+      }
+      return true;
+    }
+
+    function sameSite(href) {
+      return href && href.charAt(0) === '/' && href.charAt(1) !== '/';
+    }
+
+    document.addEventListener('click', function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target && e.target.closest ? e.target.closest('a') : null;
+      if (!a) return;
+      const href = a.getAttribute('href');
+      if (!sameSite(href) || a.target === '_blank' || a.hasAttribute('download')) return;
+      e.preventDefault();
+      navigate(href, true).catch(function () { location.href = href; });
+    }, true);
+
+    document.addEventListener('submit', function (e) {
+      const form = e.target;
+      if (!form || form.id !== 'searchForm') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const inp = form.querySelector('input');
+      const q = (inp && inp.value ? inp.value : '').trim();
+      navigate(q ? '/?q=' + encodeURIComponent(q) : '/', true).catch(function () {
+        location.href = q ? '/?q=' + encodeURIComponent(q) : '/';
+      });
+    }, true);
+
+    window.addEventListener('popstate', function () {
+      navigate(location.pathname + location.search, false).catch(function () { location.reload(); });
+    });
+  })();
+  </script>
+
   {% block script %}{% endblock %}
 </body>
 </html>

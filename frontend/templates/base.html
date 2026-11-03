@@ -90,7 +90,7 @@
   </div>
   <audio id="musicAudio" preload="none"></audio>
 
-  <script>
+  <script id="armsbankMusicInit">
   (function () {
     const KEY = 'armsbank-music-v2';
     const wrap = document.getElementById('musicWrap');
@@ -306,10 +306,13 @@
 
       // 只执行「页面自己的」脚本：排除 base 里的主题、音乐和本路由
       const codes = Array.from(doc.querySelectorAll('body script'))
-        .filter(function (s) { return !s.src; })
+        .filter(function (s) {
+        // 不重新执行音乐播放器初始化脚本
+        return !s.src && s.id !== 'armsbankMusicInit';
+        })
         .map(function (s) { return s.textContent || ''; })
         .filter(function (t) {
-          return t && t.indexOf('armsbank-music-v1') === -1
+          return t
             && t.indexOf('armsbank-theme') === -1
             && t.indexOf(MARK) === -1;
         });

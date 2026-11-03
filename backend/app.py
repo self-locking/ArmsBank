@@ -1262,37 +1262,78 @@ def nation_file(filename: str):
 
 
 # ---------------------------------------------------------------- 音乐（背景音乐播放器）
-# 音频不入库：56 个 wav 直接放在 data/music/，按 "编号_名称.wav" 命名，
-# 这里只把文件名列出来给前端，由 /music/<文件名> 送出。
+# 音频文件放在 data/music/，命名格式：001_Comfy.mp3
 MUSIC_DIR = os.environ.get("ARMSBANK_MUSIC_DIR") or os.path.join(BASE_DIR, "data", "music")
 
 _MUSIC_CACHE = {"sig": None, "tracks": []}
 
 
 def _music_tracks():
-    """扫描 data/music/，返回 [{file, name, order}]，按编号排序。
-
-    文件名形如 001_Comfy.wav：展示名取第一个下划线之后的部分。
-    """
+    """扫描音乐目录，返回 [{file, name, order}]，按编号排序。"""
     if not os.path.isdir(MUSIC_DIR):
         return []
+
     try:
         entries = []
+
         for name in os.listdir(MUSIC_DIR):
             low = name.lower()
-            if not low.endswith(".wav"):
+
+            # 目前播放器统一使用 MP3
+            if not low.endswith(".mp3"):
                 continue
-            stem = name[:-4]
+
+            path = os.path.join(MUSIC_DIR, name)
+            if not os.path.isfile(path):
+                continue
+
+            stem = os.path.splitext(name)[0]
             order, _, title = stem.partition("_")
+
             if not title:
                 order, title = "", stem
-            entries.append({"file": name, "name": title.strip(), "order": order})
-        sig = (len(entries), max((e["file"] for e in entries), default=""))
+
+            stat = os.stat(path)
+
+            entries.append({
+                "file": name,
+                "name": title.strip(),
+                "order": order,
+                "_mtime": stat.st_mtime_ns,
+                "_size": stat.st_size,
+            })
+
+        # 文件名、修改时间、大小发生变化时，重新生成索引
+        sig = tuple(sorted(
+            (e["file"], e["_mtime"], e["_size"])
+            for e in entries
+        ))
+
         if _MUSIC_CACHE["sig"] != sig:
-            entries.sort(key=lambda x: (x["order"], x["name"]))
-            _MUSIC_CACHE["tracks"] = entries
+            def sort_key(item):
+                order = item["order"]
+                return (
+                    0, int(order), item["name"]
+                ) if order.isdigit() else (
+                    1, order, item["name"]
+                )
+
+            entries.sort(key=sort_key)
+
+            # 不把内部缓存字段返回给前端
+            _MUSIC_CACHE["tracks"] = [
+                {
+                    "file": e["file"],
+                    "name": e["name"],
+                    "order": e["order"],
+                }
+                for e in entries
+            ]
+
             _MUSIC_CACHE["sig"] = sig
+
         return _MUSIC_CACHE["tracks"]
+
     except OSError:
         return []
 
@@ -1300,18 +1341,24 @@ def _music_tracks():
 @app.get("/api/music")
 def api_music():
     tracks = _music_tracks()
-    return jsonify({"ok": True, "count": len(tracks), "tracks": tracks})
+    return jsonify({
+        "ok": True,
+        "count": len(tracks),
+        "tracks": tracks
+    })
 
 
 @app.get("/music/<path:filename>")
 def music_file(filename: str):
-    """音频文件。只在 data/music/ 里找，且必须是 .wav。"""
-    if not filename.lower().endswith(".wav"):
-        return jsonify({"error": "只提供 wav"}), 404
+    """只提供 data/music/ 目录中的 MP3 文件。"""
+
+    if not filename.lower().endswith(".mp3"):
+        return jsonify({"error": "只提供 MP3 文件"}), 404
+
     if not os.path.isdir(MUSIC_DIR):
         return jsonify({"error": f"音乐目录不存在：{MUSIC_DIR}"}), 404
-    return send_from_directory(MUSIC_DIR, filename, max_age=86400)
 
+    return send_from_directory(MUSIC_DIR, filename, max_age=86400)
 
 # ---------------------------------------------------------------- 历史档案（角色详情附加板块）
 # data/history/pic/DOL1001.jpg + data/history/txt/DOL1001.txt，文件名即角色ID。

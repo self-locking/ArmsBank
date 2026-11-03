@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ArmsBank{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
   <script>
   // 主题（白天 / 黑夜）+ 随机背景图。放在 <head> 里先执行，避免页面先白后黑地闪一下。
   (function () {
@@ -91,7 +92,7 @@
 
   <script>
   (function () {
-    const KEY = 'armsbank-music-v1';
+    const KEY = 'armsbank-music-v2';
     const wrap = document.getElementById('musicWrap');
     const btn = document.getElementById('musicBtn');
     const panel = document.getElementById('musicPanel');
@@ -162,7 +163,7 @@
       if (!items.length) {
         const p = document.createElement('p');
         p.className = 'music-empty';
-        p.textContent = 'data/music 下没有找到 wav 文件';
+        p.textContent = 'data/music 下没有找到 mp3 文件';
         listBox.appendChild(p);
         return;
       }

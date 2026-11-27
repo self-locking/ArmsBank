@@ -16,7 +16,7 @@ const back = document.getElementById('back');
 
 const keyword = new URLSearchParams(location.search).get('q') || '';
 input.value = keyword;
-if (keyword) back.href = '/?q=' + encodeURIComponent(keyword);
+back.href = '/' + location.search;
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();

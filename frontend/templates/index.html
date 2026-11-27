@@ -197,7 +197,7 @@ function buildRow(ch, keyword) {
   const a = document.createElement('a');
   a.className = 'card' + (ch.name_matched ? ' namehit' : '') + (ch.rarity ? ' r' + ch.rarity : '');
   a.href = '/c/' + encodeURIComponent(ch.charid)
-    + (keyword ? '?q=' + encodeURIComponent(keyword) : '');
+    + location.search;
 
   const line = el('div', 'card-line');
   line.appendChild(el('span', 'stars', stars(ch.rarity)));
@@ -680,8 +680,8 @@ function renderSortControls() {
   select.setAttribute('aria-label', '角色卡片排序属性');
   select.style.cssText = [
     'min-width:130px', 'max-width:100%', 'padding:7px 10px',
-    'border:1px solid var(--line, #3a3f48)', 'border-radius:8px',
-    'background:var(--panel, #20242b)', 'color:inherit',
+    'border:1px solid var(--line)', 'border-radius:8px',
+    'background:var(--card)', 'color:inherit',
     'font:inherit', 'font-size:13px'
   ].join(';');
 
@@ -708,8 +708,8 @@ function renderSortControls() {
   direction.type = 'button';
   direction.setAttribute('aria-label', '切换排序方向');
   direction.style.cssText = [
-    'padding:7px 10px', 'border:1px solid var(--line, #3a3f48)',
-    'border-radius:8px', 'background:var(--panel, #20242b)',
+    'padding:7px 10px', 'border:1px solid var(--line)',
+    'border-radius:8px', 'background:var(--card)',
     'color:inherit', 'font:inherit', 'font-size:13px', 'cursor:pointer'
   ].join(';');
   direction.disabled = !sortKey;
